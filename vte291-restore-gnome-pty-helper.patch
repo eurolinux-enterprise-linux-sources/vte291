@@ -1,0 +1,3783 @@
+From eafad96a6a54c525625ab31cf30cd741ec383492 Mon Sep 17 00:00:00 2001
+From: Debarshi Ray <debarshir@gnome.org>
+Date: Tue, 25 Apr 2017 17:15:36 +0200
+Subject: [PATCH 1/4] Restore gnome-pty-helper
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1443504
+---
+ Makefile.am                            |   5 +
+ configure.ac                           |  32 +-
+ gnome-pty-helper/AUTHORS               |   4 +
+ gnome-pty-helper/COPYING               | 502 ++++++++++++++++++++++
+ gnome-pty-helper/Makefile.am           |  32 ++
+ gnome-pty-helper/README                |   9 +
+ gnome-pty-helper/acinclude.m4          | 244 +++++++++++
+ gnome-pty-helper/configure.ac          |  33 ++
+ gnome-pty-helper/git.mk                |   1 +
+ gnome-pty-helper/gnome-login-support.c | 380 +++++++++++++++++
+ gnome-pty-helper/gnome-login-support.h |  39 ++
+ gnome-pty-helper/gnome-pty-helper.c    | 751 +++++++++++++++++++++++++++++++++
+ gnome-pty-helper/gnome-pty.h           |  22 +
+ gnome-pty-helper/gnome-utmp.c          | 374 ++++++++++++++++
+ src/pty.cc                             | 526 ++++++++++++++++++++++-
+ src/vte.cc                             |   2 +
+ src/vte/vteenums.h                     |  15 +-
+ 17 files changed, 2953 insertions(+), 18 deletions(-)
+ create mode 100644 gnome-pty-helper/AUTHORS
+ create mode 100644 gnome-pty-helper/COPYING
+ create mode 100644 gnome-pty-helper/Makefile.am
+ create mode 100644 gnome-pty-helper/README
+ create mode 100644 gnome-pty-helper/acinclude.m4
+ create mode 100644 gnome-pty-helper/configure.ac
+ create mode 100644 gnome-pty-helper/git.mk
+ create mode 100644 gnome-pty-helper/gnome-login-support.c
+ create mode 100644 gnome-pty-helper/gnome-login-support.h
+ create mode 100644 gnome-pty-helper/gnome-pty-helper.c
+ create mode 100644 gnome-pty-helper/gnome-pty.h
+ create mode 100644 gnome-pty-helper/gnome-utmp.c
+
+diff --git a/Makefile.am b/Makefile.am
+index 10c9c93b84a9..1603cce544f8 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -12,6 +12,10 @@ EXTRA_DIST = \
+ 
+ DISTCLEANFILES =
+ 
++if BUILD_GNOME_PTY_HELPER
++SUBDIRS += gnome-pty-helper
++endif
++
+ if ENABLE_GLADE_CATALOGUE
+ SUBDIRS += glade
+ endif
+@@ -24,6 +28,7 @@ DISTCHECK_CONFIGURE_FLAGS = \
+ 	--enable-introspection \
+ 	--disable-vala \
+ 	--disable-test-application \
++	--enable-gnome-pty-helper \
+ 	--disable-silent-rules \
+ 	--with-gtk=$(GTK_API_VERSION)
+ 
+diff --git a/configure.ac b/configure.ac
+index a2f8792e2193..6f73b0a240f5 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -278,9 +278,22 @@ VTE_DEFAULT_TERM=xterm-256color
+ AC_DEFINE_UNQUOTED(VTE_DEFAULT_TERM,"$VTE_DEFAULT_TERM",[The default value $TERM is set to.])
+ 
+ # Check for headers.
+-AC_CHECK_HEADERS([sys/select.h sys/syslimits.h sys/termios.h sys/wait.h stropts.h termios.h util.h wchar.h pty.h])
++AC_CHECK_HEADERS([sys/select.h sys/syslimits.h sys/termios.h sys/un.h sys/wait.h stropts.h termios.h util.h wchar.h pty.h])
+ AC_HEADER_TIOCGWINSZ
+ 
++AC_CHECK_FUNC(socket,[have_socket=1],AC_CHECK_LIB(socket,socket,[have_socket=1; LIBS="$LIBS -lsocket"]))
++AC_CHECK_FUNC(socketpair,[have_socketpair=1],AC_CHECK_LIB(socket,socketpair,[have_socketpair=1; LIBS="$LIBS -lsocket"]))
++AC_CHECK_FUNC(recvmsg,[have_recvmsg=1],AC_CHECK_LIB(socket,recvmsg,[have_recvmsg=1; LIBS="$LIBS -lsocket -lnsl"]))
++if test x$have_socket = x1 ; then
++	AC_DEFINE(HAVE_SOCKET,1,[Define if you have the socket function.])
++fi
++if test x$have_socketpair = x1 ; then
++	AC_DEFINE(HAVE_SOCKETPAIR,1,[Define if you have the socketpair function.])
++fi
++if test x$have_recvmsg = x1 ; then
++	AC_DEFINE(HAVE_RECVMSG,1,[Define if you have the recvmsg function.])
++fi
++
+ # Check for how to open a new PTY. We support posix_openpt and BSDs openpty
+ 
+ AC_CHECK_FUNCS([posix_openpt grantpt unlockpt ptsname],[],
+@@ -322,6 +335,22 @@ PKG_CHECK_MODULES([APP],[
+   gdk-pixbuf-2.0
+   gtk+-$GTK_API_VERSION >= $GTK_REQUIRED])
+ 
++################################################################################
++# GNOME PTY Helper
++################################################################################
++
++AC_MSG_CHECKING([whether to build the PTY helper binary])
++AC_ARG_ENABLE(gnome-pty-helper,
++  [AS_HELP_STRING([--disable-gnome-pty-helper],
++                  [Build a setuid helper for opening ptys])],
++  [],[enable_gnome_pty_helper=no])
++AC_MSG_RESULT([$enable_gnome_pty_helper])
++if test "$enable_gnome_pty_helper" != no; then
++	AC_DEFINE(VTE_USE_GNOME_PTY_HELPER,1,[Define if you intend to use gnome-pty-helper.])
++	AC_CONFIG_SUBDIRS(gnome-pty-helper)
++fi
++AM_CONDITIONAL(BUILD_GNOME_PTY_HELPER,[test "$enable_gnome_pty_helper" != no])
++
+ ################################################################################
+ # Glade catalogue
+ ################################################################################
+@@ -465,4 +494,5 @@ Configuration for libvte $VERSION for gtk+-$GTK_API_VERSION
+ 	Debugging: $enable_debug
+ 	Introspection: $enable_introspection
+         Vala bindings: $enable_vala
++	PTY helper: $enable_gnome_pty_helper
+ EOF
+diff --git a/gnome-pty-helper/AUTHORS b/gnome-pty-helper/AUTHORS
+new file mode 100644
+index 000000000000..99a686ffedff
+--- /dev/null
++++ b/gnome-pty-helper/AUTHORS
+@@ -0,0 +1,4 @@
++Michael Zucchi <zucchi@helixcode.com>
++Dugan Porter
++Miguel de Icaza <miguel@gnu.org>
++Timur Bakeyev <timur@gnu.org>
+diff --git a/gnome-pty-helper/COPYING b/gnome-pty-helper/COPYING
+new file mode 100644
+index 000000000000..4362b49151d7
+--- /dev/null
++++ b/gnome-pty-helper/COPYING
+@@ -0,0 +1,502 @@
++                  GNU LESSER GENERAL PUBLIC LICENSE
++                       Version 2.1, February 1999
++
++ Copyright (C) 1991, 1999 Free Software Foundation, Inc.
++ 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ Everyone is permitted to copy and distribute verbatim copies
++ of this license document, but changing it is not allowed.
++
++[This is the first released version of the Lesser GPL.  It also counts
++ as the successor of the GNU Library Public License, version 2, hence
++ the version number 2.1.]
++
++                            Preamble
++
++  The licenses for most software are designed to take away your
++freedom to share and change it.  By contrast, the GNU General Public
++Licenses are intended to guarantee your freedom to share and change
++free software--to make sure the software is free for all its users.
++
++  This license, the Lesser General Public License, applies to some
++specially designated software packages--typically libraries--of the
++Free Software Foundation and other authors who decide to use it.  You
++can use it too, but we suggest you first think carefully about whether
++this license or the ordinary General Public License is the better
++strategy to use in any particular case, based on the explanations below.
++
++  When we speak of free software, we are referring to freedom of use,
++not price.  Our General Public Licenses are designed to make sure that
++you have the freedom to distribute copies of free software (and charge
++for this service if you wish); that you receive source code or can get
++it if you want it; that you can change the software and use pieces of
++it in new free programs; and that you are informed that you can do
++these things.
++
++  To protect your rights, we need to make restrictions that forbid
++distributors to deny you these rights or to ask you to surrender these
++rights.  These restrictions translate to certain responsibilities for
++you if you distribute copies of the library or if you modify it.
++
++  For example, if you distribute copies of the library, whether gratis
++or for a fee, you must give the recipients all the rights that we gave
++you.  You must make sure that they, too, receive or can get the source
++code.  If you link other code with the library, you must provide
++complete object files to the recipients, so that they can relink them
++with the library after making changes to the library and recompiling
++it.  And you must show them these terms so they know their rights.
++
++  We protect your rights with a two-step method: (1) we copyright the
++library, and (2) we offer you this license, which gives you legal
++permission to copy, distribute and/or modify the library.
++
++  To protect each distributor, we want to make it very clear that
++there is no warranty for the free library.  Also, if the library is
++modified by someone else and passed on, the recipients should know
++that what they have is not the original version, so that the original
++author's reputation will not be affected by problems that might be
++introduced by others.
++
++  Finally, software patents pose a constant threat to the existence of
++any free program.  We wish to make sure that a company cannot
++effectively restrict the users of a free program by obtaining a
++restrictive license from a patent holder.  Therefore, we insist that
++any patent license obtained for a version of the library must be
++consistent with the full freedom of use specified in this license.
++
++  Most GNU software, including some libraries, is covered by the
++ordinary GNU General Public License.  This license, the GNU Lesser
++General Public License, applies to certain designated libraries, and
++is quite different from the ordinary General Public License.  We use
++this license for certain libraries in order to permit linking those
++libraries into non-free programs.
++
++  When a program is linked with a library, whether statically or using
++a shared library, the combination of the two is legally speaking a
++combined work, a derivative of the original library.  The ordinary
++General Public License therefore permits such linking only if the
++entire combination fits its criteria of freedom.  The Lesser General
++Public License permits more lax criteria for linking other code with
++the library.
++
++  We call this license the "Lesser" General Public License because it
++does Less to protect the user's freedom than the ordinary General
++Public License.  It also provides other free software developers Less
++of an advantage over competing non-free programs.  These disadvantages
++are the reason we use the ordinary General Public License for many
++libraries.  However, the Lesser license provides advantages in certain
++special circumstances.
++
++  For example, on rare occasions, there may be a special need to
++encourage the widest possible use of a certain library, so that it becomes
++a de-facto standard.  To achieve this, non-free programs must be
++allowed to use the library.  A more frequent case is that a free
++library does the same job as widely used non-free libraries.  In this
++case, there is little to gain by limiting the free library to free
++software only, so we use the Lesser General Public License.
++
++  In other cases, permission to use a particular library in non-free
++programs enables a greater number of people to use a large body of
++free software.  For example, permission to use the GNU C Library in
++non-free programs enables many more people to use the whole GNU
++operating system, as well as its variant, the GNU/Linux operating
++system.
++
++  Although the Lesser General Public License is Less protective of the
++users' freedom, it does ensure that the user of a program that is
++linked with the Library has the freedom and the wherewithal to run
++that program using a modified version of the Library.
++
++  The precise terms and conditions for copying, distribution and
++modification follow.  Pay close attention to the difference between a
++"work based on the library" and a "work that uses the library".  The
++former contains code derived from the library, whereas the latter must
++be combined with the library in order to run.
++
++                  GNU LESSER GENERAL PUBLIC LICENSE
++   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
++
++  0. This License Agreement applies to any software library or other
++program which contains a notice placed by the copyright holder or
++other authorized party saying it may be distributed under the terms of
++this Lesser General Public License (also called "this License").
++Each licensee is addressed as "you".
++
++  A "library" means a collection of software functions and/or data
++prepared so as to be conveniently linked with application programs
++(which use some of those functions and data) to form executables.
++
++  The "Library", below, refers to any such software library or work
++which has been distributed under these terms.  A "work based on the
++Library" means either the Library or any derivative work under
++copyright law: that is to say, a work containing the Library or a
++portion of it, either verbatim or with modifications and/or translated
++straightforwardly into another language.  (Hereinafter, translation is
++included without limitation in the term "modification".)
++
++  "Source code" for a work means the preferred form of the work for
++making modifications to it.  For a library, complete source code means
++all the source code for all modules it contains, plus any associated
++interface definition files, plus the scripts used to control compilation
++and installation of the library.
++
++  Activities other than copying, distribution and modification are not
++covered by this License; they are outside its scope.  The act of
++running a program using the Library is not restricted, and output from
++such a program is covered only if its contents constitute a work based
++on the Library (independent of the use of the Library in a tool for
++writing it).  Whether that is true depends on what the Library does
++and what the program that uses the Library does.
++
++  1. You may copy and distribute verbatim copies of the Library's
++complete source code as you receive it, in any medium, provided that
++you conspicuously and appropriately publish on each copy an
++appropriate copyright notice and disclaimer of warranty; keep intact
++all the notices that refer to this License and to the absence of any
++warranty; and distribute a copy of this License along with the
++Library.
++
++  You may charge a fee for the physical act of transferring a copy,
++and you may at your option offer warranty protection in exchange for a
++fee.
++
++  2. You may modify your copy or copies of the Library or any portion
++of it, thus forming a work based on the Library, and copy and
++distribute such modifications or work under the terms of Section 1
++above, provided that you also meet all of these conditions:
++
++    a) The modified work must itself be a software library.
++
++    b) You must cause the files modified to carry prominent notices
++    stating that you changed the files and the date of any change.
++
++    c) You must cause the whole of the work to be licensed at no
++    charge to all third parties under the terms of this License.
++
++    d) If a facility in the modified Library refers to a function or a
++    table of data to be supplied by an application program that uses
++    the facility, other than as an argument passed when the facility
++    is invoked, then you must make a good faith effort to ensure that,
++    in the event an application does not supply such function or
++    table, the facility still operates, and performs whatever part of
++    its purpose remains meaningful.
++
++    (For example, a function in a library to compute square roots has
++    a purpose that is entirely well-defined independent of the
++    application.  Therefore, Subsection 2d requires that any
++    application-supplied function or table used by this function must
++    be optional: if the application does not supply it, the square
++    root function must still compute square roots.)
++
++These requirements apply to the modified work as a whole.  If
++identifiable sections of that work are not derived from the Library,
++and can be reasonably considered independent and separate works in
++themselves, then this License, and its terms, do not apply to those
++sections when you distribute them as separate works.  But when you
++distribute the same sections as part of a whole which is a work based
++on the Library, the distribution of the whole must be on the terms of
++this License, whose permissions for other licensees extend to the
++entire whole, and thus to each and every part regardless of who wrote
++it.
++
++Thus, it is not the intent of this section to claim rights or contest
++your rights to work written entirely by you; rather, the intent is to
++exercise the right to control the distribution of derivative or
++collective works based on the Library.
++
++In addition, mere aggregation of another work not based on the Library
++with the Library (or with a work based on the Library) on a volume of
++a storage or distribution medium does not bring the other work under
++the scope of this License.
++
++  3. You may opt to apply the terms of the ordinary GNU General Public
++License instead of this License to a given copy of the Library.  To do
++this, you must alter all the notices that refer to this License, so
++that they refer to the ordinary GNU General Public License, version 2,
++instead of to this License.  (If a newer version than version 2 of the
++ordinary GNU General Public License has appeared, then you can specify
++that version instead if you wish.)  Do not make any other change in
++these notices.
++
++  Once this change is made in a given copy, it is irreversible for
++that copy, so the ordinary GNU General Public License applies to all
++subsequent copies and derivative works made from that copy.
++
++  This option is useful when you wish to copy part of the code of
++the Library into a program that is not a library.
++
++  4. You may copy and distribute the Library (or a portion or
++derivative of it, under Section 2) in object code or executable form
++under the terms of Sections 1 and 2 above provided that you accompany
++it with the complete corresponding machine-readable source code, which
++must be distributed under the terms of Sections 1 and 2 above on a
++medium customarily used for software interchange.
++
++  If distribution of object code is made by offering access to copy
++from a designated place, then offering equivalent access to copy the
++source code from the same place satisfies the requirement to
++distribute the source code, even though third parties are not
++compelled to copy the source along with the object code.
++
++  5. A program that contains no derivative of any portion of the
++Library, but is designed to work with the Library by being compiled or
++linked with it, is called a "work that uses the Library".  Such a
++work, in isolation, is not a derivative work of the Library, and
++therefore falls outside the scope of this License.
++
++  However, linking a "work that uses the Library" with the Library
++creates an executable that is a derivative of the Library (because it
++contains portions of the Library), rather than a "work that uses the
++library".  The executable is therefore covered by this License.
++Section 6 states terms for distribution of such executables.
++
++  When a "work that uses the Library" uses material from a header file
++that is part of the Library, the object code for the work may be a
++derivative work of the Library even though the source code is not.
++Whether this is true is especially significant if the work can be
++linked without the Library, or if the work is itself a library.  The
++threshold for this to be true is not precisely defined by law.
++
++  If such an object file uses only numerical parameters, data
++structure layouts and accessors, and small macros and small inline
++functions (ten lines or less in length), then the use of the object
++file is unrestricted, regardless of whether it is legally a derivative
++work.  (Executables containing this object code plus portions of the
++Library will still fall under Section 6.)
++
++  Otherwise, if the work is a derivative of the Library, you may
++distribute the object code for the work under the terms of Section 6.
++Any executables containing that work also fall under Section 6,
++whether or not they are linked directly with the Library itself.
++
++  6. As an exception to the Sections above, you may also combine or
++link a "work that uses the Library" with the Library to produce a
++work containing portions of the Library, and distribute that work
++under terms of your choice, provided that the terms permit
++modification of the work for the customer's own use and reverse
++engineering for debugging such modifications.
++
++  You must give prominent notice with each copy of the work that the
++Library is used in it and that the Library and its use are covered by
++this License.  You must supply a copy of this License.  If the work
++during execution displays copyright notices, you must include the
++copyright notice for the Library among them, as well as a reference
++directing the user to the copy of this License.  Also, you must do one
++of these things:
++
++    a) Accompany the work with the complete corresponding
++    machine-readable source code for the Library including whatever
++    changes were used in the work (which must be distributed under
++    Sections 1 and 2 above); and, if the work is an executable linked
++    with the Library, with the complete machine-readable "work that
++    uses the Library", as object code and/or source code, so that the
++    user can modify the Library and then relink to produce a modified
++    executable containing the modified Library.  (It is understood
++    that the user who changes the contents of definitions files in the
++    Library will not necessarily be able to recompile the application
++    to use the modified definitions.)
++
++    b) Use a suitable shared library mechanism for linking with the
++    Library.  A suitable mechanism is one that (1) uses at run time a
++    copy of the library already present on the user's computer system,
++    rather than copying library functions into the executable, and (2)
++    will operate properly with a modified version of the library, if
++    the user installs one, as long as the modified version is
++    interface-compatible with the version that the work was made with.
++
++    c) Accompany the work with a written offer, valid for at
++    least three years, to give the same user the materials
++    specified in Subsection 6a, above, for a charge no more
++    than the cost of performing this distribution.
++
++    d) If distribution of the work is made by offering access to copy
++    from a designated place, offer equivalent access to copy the above
++    specified materials from the same place.
++
++    e) Verify that the user has already received a copy of these
++    materials or that you have already sent this user a copy.
++
++  For an executable, the required form of the "work that uses the
++Library" must include any data and utility programs needed for
++reproducing the executable from it.  However, as a special exception,
++the materials to be distributed need not include anything that is
++normally distributed (in either source or binary form) with the major
++components (compiler, kernel, and so on) of the operating system on
++which the executable runs, unless that component itself accompanies
++the executable.
++
++  It may happen that this requirement contradicts the license
++restrictions of other proprietary libraries that do not normally
++accompany the operating system.  Such a contradiction means you cannot
++use both them and the Library together in an executable that you
++distribute.
++
++  7. You may place library facilities that are a work based on the
++Library side-by-side in a single library together with other library
++facilities not covered by this License, and distribute such a combined
++library, provided that the separate distribution of the work based on
++the Library and of the other library facilities is otherwise
++permitted, and provided that you do these two things:
++
++    a) Accompany the combined library with a copy of the same work
++    based on the Library, uncombined with any other library
++    facilities.  This must be distributed under the terms of the
++    Sections above.
++
++    b) Give prominent notice with the combined library of the fact
++    that part of it is a work based on the Library, and explaining
++    where to find the accompanying uncombined form of the same work.
++
++  8. You may not copy, modify, sublicense, link with, or distribute
++the Library except as expressly provided under this License.  Any
++attempt otherwise to copy, modify, sublicense, link with, or
++distribute the Library is void, and will automatically terminate your
++rights under this License.  However, parties who have received copies,
++or rights, from you under this License will not have their licenses
++terminated so long as such parties remain in full compliance.
++
++  9. You are not required to accept this License, since you have not
++signed it.  However, nothing else grants you permission to modify or
++distribute the Library or its derivative works.  These actions are
++prohibited by law if you do not accept this License.  Therefore, by
++modifying or distributing the Library (or any work based on the
++Library), you indicate your acceptance of this License to do so, and
++all its terms and conditions for copying, distributing or modifying
++the Library or works based on it.
++
++  10. Each time you redistribute the Library (or any work based on the
++Library), the recipient automatically receives a license from the
++original licensor to copy, distribute, link with or modify the Library
++subject to these terms and conditions.  You may not impose any further
++restrictions on the recipients' exercise of the rights granted herein.
++You are not responsible for enforcing compliance by third parties with
++this License.
++
++  11. If, as a consequence of a court judgment or allegation of patent
++infringement or for any other reason (not limited to patent issues),
++conditions are imposed on you (whether by court order, agreement or
++otherwise) that contradict the conditions of this License, they do not
++excuse you from the conditions of this License.  If you cannot
++distribute so as to satisfy simultaneously your obligations under this
++License and any other pertinent obligations, then as a consequence you
++may not distribute the Library at all.  For example, if a patent
++license would not permit royalty-free redistribution of the Library by
++all those who receive copies directly or indirectly through you, then
++the only way you could satisfy both it and this License would be to
++refrain entirely from distribution of the Library.
++
++If any portion of this section is held invalid or unenforceable under any
++particular circumstance, the balance of the section is intended to apply,
++and the section as a whole is intended to apply in other circumstances.
++
++It is not the purpose of this section to induce you to infringe any
++patents or other property right claims or to contest validity of any
++such claims; this section has the sole purpose of protecting the
++integrity of the free software distribution system which is
++implemented by public license practices.  Many people have made
++generous contributions to the wide range of software distributed
++through that system in reliance on consistent application of that
++system; it is up to the author/donor to decide if he or she is willing
++to distribute software through any other system and a licensee cannot
++impose that choice.
++
++This section is intended to make thoroughly clear what is believed to
++be a consequence of the rest of this License.
++
++  12. If the distribution and/or use of the Library is restricted in
++certain countries either by patents or by copyrighted interfaces, the
++original copyright holder who places the Library under this License may add
++an explicit geographical distribution limitation excluding those countries,
++so that distribution is permitted only in or among countries not thus
++excluded.  In such case, this License incorporates the limitation as if
++written in the body of this License.
++
++  13. The Free Software Foundation may publish revised and/or new
++versions of the Lesser General Public License from time to time.
++Such new versions will be similar in spirit to the present version,
++but may differ in detail to address new problems or concerns.
++
++Each version is given a distinguishing version number.  If the Library
++specifies a version number of this License which applies to it and
++"any later version", you have the option of following the terms and
++conditions either of that version or of any later version published by
++the Free Software Foundation.  If the Library does not specify a
++license version number, you may choose any version ever published by
++the Free Software Foundation.
++
++  14. If you wish to incorporate parts of the Library into other free
++programs whose distribution conditions are incompatible with these,
++write to the author to ask for permission.  For software which is
++copyrighted by the Free Software Foundation, write to the Free
++Software Foundation; we sometimes make exceptions for this.  Our
++decision will be guided by the two goals of preserving the free status
++of all derivatives of our free software and of promoting the sharing
++and reuse of software generally.
++
++                            NO WARRANTY
++
++  15. BECAUSE THE LIBRARY IS LICENSED FREE OF CHARGE, THERE IS NO
++WARRANTY FOR THE LIBRARY, TO THE EXTENT PERMITTED BY APPLICABLE LAW.
++EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT HOLDERS AND/OR
++OTHER PARTIES PROVIDE THE LIBRARY "AS IS" WITHOUT WARRANTY OF ANY
++KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE
++LIBRARY IS WITH YOU.  SHOULD THE LIBRARY PROVE DEFECTIVE, YOU ASSUME
++THE COST OF ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
++
++  16. IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN
++WRITING WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MAY MODIFY
++AND/OR REDISTRIBUTE THE LIBRARY AS PERMITTED ABOVE, BE LIABLE TO YOU
++FOR DAMAGES, INCLUDING ANY GENERAL, SPECIAL, INCIDENTAL OR
++CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OR INABILITY TO USE THE
++LIBRARY (INCLUDING BUT NOT LIMITED TO LOSS OF DATA OR DATA BEING
++RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD PARTIES OR A
++FAILURE OF THE LIBRARY TO OPERATE WITH ANY OTHER SOFTWARE), EVEN IF
++SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH
++DAMAGES.
++
++                     END OF TERMS AND CONDITIONS
++
++           How to Apply These Terms to Your New Libraries
++
++  If you develop a new library, and you want it to be of the greatest
++possible use to the public, we recommend making it free software that
++everyone can redistribute and change.  You can do so by permitting
++redistribution under these terms (or, alternatively, under the terms of the
++ordinary General Public License).
++
++  To apply these terms, attach the following notices to the library.  It is
++safest to attach them to the start of each source file to most effectively
++convey the exclusion of warranty; and each file should have at least the
++"copyright" line and a pointer to where the full notice is found.
++
++    <one line to give the library's name and a brief idea of what it does.>
++    Copyright (C) <year>  <name of author>
++
++    This library is free software; you can redistribute it and/or
++    modify it under the terms of the GNU Lesser General Public
++    License as published by the Free Software Foundation; either
++    version 2.1 of the License, or (at your option) any later version.
++
++    This library is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++    Lesser General Public License for more details.
++
++    You should have received a copy of the GNU Lesser General Public
++    License along with this library; if not, write to the Free Software
++    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++
++Also add information on how to contact you by electronic and paper mail.
++
++You should also get your employer (if you work as a programmer) or your
++school, if any, to sign a "copyright disclaimer" for the library, if
++necessary.  Here is a sample; alter the names:
++
++  Yoyodyne, Inc., hereby disclaims all copyright interest in the
++  library `Frob' (a library for tweaking knobs) written by James Random Hacker.
++
++  <signature of Ty Coon>, 1 April 1990
++  Ty Coon, President of Vice
++
++That's all there is to it!
+diff --git a/gnome-pty-helper/Makefile.am b/gnome-pty-helper/Makefile.am
+new file mode 100644
+index 000000000000..10a1c896e958
+--- /dev/null
++++ b/gnome-pty-helper/Makefile.am
+@@ -0,0 +1,32 @@
++libexec_PROGRAMS = gnome-pty-helper
++
++gnome_pty_helper_SOURCES = \
++	gnome-pty.h \
++	gnome-login-support.c \
++	gnome-login-support.h \
++	gnome-pty-helper.c \
++	gnome-utmp.c
++
++gnome_pty_helper_CFLAGS = $(SUID_CFLAGS) $(AM_CFLAGS)
++gnome_pty_helper_LDFLAGS = $(SUID_LDFLAGS) $(AM_LDFLAGS)
++
++install-exec-hook:
++	chown root.utmp $(DESTDIR)$(libexecdir)/gnome-pty-helper || true
++	chmod g+s       $(DESTDIR)$(libexecdir)/gnome-pty-helper || true
++
++MAINTAINERCLEANFILES = \
++		$(srcdir)/INSTALL \
++		$(srcdir)/aclocal.m4 \
++		$(srcdir)/config.guess \
++		$(srcdir)/config.h.in \
++		$(srcdir)/config.sub \
++		$(srcdir)/configure \
++		$(srcdir)/depcomp \
++		$(srcdir)/install-sh \
++		$(srcdir)/mkinstalldirs \
++		$(srcdir)/missing \
++		$(srcdir)/omf.make \
++		$(srcdir)/xmldocs.make \
++		`find "$(srcdir)" -type f -name Makefile.in -print`
++
++-include $(top_srcdir)/git.mk
+diff --git a/gnome-pty-helper/README b/gnome-pty-helper/README
+new file mode 100644
+index 000000000000..b760129a0dde
+--- /dev/null
++++ b/gnome-pty-helper/README
+@@ -0,0 +1,9 @@
++This is some bits from libzvt CVS extracted to make a more-or-less standalone
++gnome-pty-helper kit.  Presumably it is licensed under the LGPL, as libzvt
++itself is.
++
++Note that for utmp/wtmp/lastlog logging to work properly, you *must* ensure
++that gnome-pty-helper is installed with the correct permissions.  By default,
++gnome-pty-helper is installed setgid "utmp".  If your system does not have a
++group named "utmp" (or if this group does not have write access to the
++corresponding log files), then it will probably need to be made setuid "root".
+diff --git a/gnome-pty-helper/acinclude.m4 b/gnome-pty-helper/acinclude.m4
+new file mode 100644
+index 000000000000..6e8eadbc51f6
+--- /dev/null
++++ b/gnome-pty-helper/acinclude.m4
+@@ -0,0 +1,244 @@
++# Checks for availability of various utmp fields
++#
++# Original code by Bernhard Rosenkraenzer (bero@linux.net.eu.org), 1998.
++# Modifications by Timur Bakeyev (timur@gnu.org), 1999.
++# Patched from http://bugzilla.gnome.org/show_bug.cgi?id=93774
++#
++
++dnl GPH_CHECK_UTMP()
++dnl Test for presence of the field and define HAVE_UT_UT_field macro
++dnl
++
++AC_DEFUN([GPH_CHECK_UTMP],[
++
++AC_CHECK_HEADERS(sys/time.h utmp.h utmpx.h)
++AC_HEADER_TIME
++
++if test "$ac_cv_header_utmpx_h" = "yes"; then
++    AC_DEFINE(UTMP,[struct utmpx],[Define to the name of a structure which holds utmp data.])
++else
++    AC_DEFINE(UTMP,[struct utmp],[Define to the name of a structure which holds utmp data.])
++fi
++
++dnl some systems (BSD4.4-like) require time.h to be included before utmp.h :/
++AC_MSG_CHECKING(for ut_host field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; char *p; p=ut.ut_host;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_HOST,1,[Define if your utmp struct contains a ut_host field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_pid field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; int i; i=ut.ut_pid;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_PID,1,[Define if your utmp struct contains a ut_pid field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_id field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; char *p; p=ut.ut_id;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_ID,1,[Define if your utmp struct contains a ut_id field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_name field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; char *p; p=ut.ut_name;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_NAME,1,[Define if your utmp struct contains a ut_name field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_type field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; int i; i=(int) ut.ut_type;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_TYPE,1,[Define if your utmp struct contains a ut_type field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_exit.e_termination field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; ut.ut_exit.e_termination=0;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_EXIT_E_TERMINATION,1,[Define if your utmp struct contains a ut_exit.e_termination field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_user field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; char *p; p=ut.ut_user;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_USER,1,[Define if your utmp struct contains a ut_user field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_time field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; ut.ut_time=0;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_TIME,1,[Define if your utmp struct contains a ut_time field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_tv field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; ut.ut_tv.tv_sec=0; ut.ut_tv.tv_usec=0; ],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_TV,1,[Define if your utmp struct contains a ut_tv field.])
++fi
++AC_MSG_RESULT($result)
++
++AC_MSG_CHECKING(for ut_syslen field in the utmp structure)
++AC_TRY_COMPILE([#ifdef TIME_WITH_SYS_TIME
++#include <sys/time.h>
++#include <time.h>
++#else
++#ifdef HAVE_SYS_TIME_H
++#include <sys/time.h>
++#else
++#include <time.h>
++#endif
++#endif
++#ifdef HAVE_UTMP_H
++#include <utmp.h>
++#endif
++#ifdef HAVE_UTMPX_H
++#include <utmpx.h>
++#endif],[UTMP ut; ut.ut_syslen=0;],result=yes,result=no)
++if test "$result" = "yes"; then
++  AC_DEFINE(HAVE_UT_UT_SYSLEN,1,[Define if your utmp struct contains a ut_syslen field.])
++fi
++AC_MSG_RESULT($result)
++
++])
+diff --git a/gnome-pty-helper/configure.ac b/gnome-pty-helper/configure.ac
+new file mode 100644
+index 000000000000..c9f0aa460029
+--- /dev/null
++++ b/gnome-pty-helper/configure.ac
+@@ -0,0 +1,33 @@
++AC_INIT([gnome-pty-helper],[1.95.0],[http://bugzilla.gnome.org/enter_bug.cgi?product=vte])
++
++AM_INIT_AUTOMAKE([1.9 foreign no-dist-gzip dist-bzip2])
++
++AC_CONFIG_HEADERS([config.h])
++AC_CONFIG_SRCDIR([gnome-pty.h])
++
++AC_PROG_CC
++AC_USE_SYSTEM_EXTENSIONS
++AC_ISC_POSIX
++AC_PROG_CC
++AC_STDC_HEADERS
++
++AM_MAINTAINER_MODE([enable])
++
++AC_CHECK_HEADERS(sys/syslimits.h sys/time.h sys/types.h sys/un.h alloca.h lastlog.h libutil.h paths.h pty.h stropts.h termios.h ttyent.h util.h utmp.h utmpx.h pty.h util.h libutil.h ttyent.h)
++have_openpty=0
++AC_CHECK_LIB(c,grantpt,true,[AC_CHECK_LIB(pt,grantpt)])
++AC_CHECK_LIB(c,openpty,true,[AC_CHECK_LIB(util,openpty)])
++AC_CHECK_LIB(c,sendmsg,true,[AC_CHECK_LIB(socket,sendmsg,LIBS="$LIBS -lsocket -lnsl",,-lnsl)])
++AC_CHECK_FUNCS(endutent fcntl forkpty getttyent getutent getutmpx grantpt flock login_tty openpty revoke sendmsg seteuid setreuid setutent strrchr updwtmp updwtmpx utmpname utmpxname)
++GPH_CHECK_UTMP
++
++AC_CHECK_HEADERS(stropts.h)
++
++AC_ARG_VAR([SUID_CFLAGS],
++	   [CFLAGS used for binaries which are usually with the suid bit])
++AC_ARG_VAR([SUID_LDFLAGS],
++	   [LDFLAGS used for binaries which are usually with the suid bit])
++
++AC_CONFIG_FILES([Makefile])
++
++AC_OUTPUT
+diff --git a/gnome-pty-helper/git.mk b/gnome-pty-helper/git.mk
+new file mode 100644
+index 000000000000..9e5123cf4490
+--- /dev/null
++++ b/gnome-pty-helper/git.mk
+@@ -0,0 +1 @@
++include $(top_srcdir)/../git.mk
+diff --git a/gnome-pty-helper/gnome-login-support.c b/gnome-pty-helper/gnome-login-support.c
+new file mode 100644
+index 000000000000..c1a3ac67f1f5
+--- /dev/null
++++ b/gnome-pty-helper/gnome-login-support.c
+@@ -0,0 +1,380 @@
++/*
++ * gnome-login-support.c:
++ *    Replacement for systems that lack login_tty, open_pty and forkpty
++ *
++ * Author:
++ *    Miguel de Icaza (miguel@gnu.org)
++ *
++ *
++ */
++#include <config.h>
++#include <termios.h>
++#include <unistd.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <fcntl.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <termios.h>
++#include <stdlib.h>
++#include <sys/stat.h>
++#include <errno.h>
++#include <grp.h>
++#include <sys/types.h>
++#include "gnome-login-support.h"
++
++/*
++ * HAVE_OPENPTY => HAVE_FORKPTY
++ */
++
++#ifndef HAVE_LOGIN_TTY
++int
++login_tty (int fd)
++{
++	pid_t pid = getpid ();
++
++	/* Create the session */
++	setsid ();
++
++#ifdef TIOCSCTTY
++	if (ioctl (fd, TIOCSCTTY, 0) == -1)
++		return -1;
++#else /* !TIOCSTTY */
++        /* Hackery to set controlling tty on SVR4 -
++           on SVR4 the first terminal we open after sesid()
++           becomes our controlling terminal, thus we must
++           find the name of, open, and re-close the tty
++           since we already have it open at this point. */
++        {
++                char *ctty;
++                int ct_fdes;
++
++                ctty = ttyname(fd);
++                ct_fdes = open(ctty, O_RDWR);
++                close(ct_fdes);
++        }
++#endif /* !TIOCSTTY */
++
++#if defined (_POSIX_VERSION) || defined (__svr4__)
++	tcsetpgrp (0, pid);
++#elif defined (TIOCSPGRP)
++	ioctl (0, TIOCSPGRP, &pid);
++#endif
++
++	dup2 (fd, 0);
++	dup2 (fd, 1);
++	dup2 (fd, 2);
++	if (fd > 2)
++		close (fd);
++
++	return 0;
++}
++#endif
++
++#ifndef HAVE_OPENPTY
++static int
++pty_open_master_bsd (char *pty_name, int *used_bsd)
++{
++	int pty_master;
++	char *ptr1, *ptr2;
++
++	*used_bsd = 1;
++
++	strcpy (pty_name, "/dev/ptyXX");
++	for (ptr1 = "pqrstuvwxyzPQRST"; *ptr1; ++ptr1)
++	{
++		pty_name [8] = *ptr1;
++		for (ptr2 = "0123456789abcdef"; *ptr2; ++ptr2)
++		{
++			pty_name [9] = *ptr2;
++
++			/* Try to open master */
++			if ((pty_master = open (pty_name, O_RDWR)) == -1) {
++				if (errno == ENOENT)  /* Different from EIO */
++					return -1;    /* Out of pty devices */
++				else
++					continue;      /* Try next pty device */
++			}
++			pty_name [5] = 't';	       /* Change "pty" to "tty" */
++			if (access (pty_name, (R_OK | W_OK))){
++				close (pty_master);
++				pty_name [5] = 'p';
++				continue;
++			}
++			return pty_master;
++		}
++	}
++	return -1;  /* Ran out of pty devices */
++}
++
++static int
++pty_open_slave_bsd (const char *pty_name)
++{
++	int pty_slave;
++	struct group *group_info = getgrnam ("tty");
++
++	if (group_info != NULL)
++	{
++		/* The following two calls will only succeed if we are root */
++
++		chown (pty_name, getuid (), group_info->gr_gid);
++		chmod (pty_name, S_IRUSR | S_IWUSR | S_IWGRP);
++	}
++	else
++	{
++		chown (pty_name, getuid (), -1);
++		chmod (pty_name, S_IRUSR | S_IWUSR | S_IWGRP);
++	}
++
++#ifdef HAVE_REVOKE
++	revoke (pty_name);
++#endif
++
++	if ((pty_slave = open (pty_name, O_RDWR)) == -1){
++		return -1;
++	}
++
++	return pty_slave;
++}
++
++/* SystemVish pty opening */
++#if defined (HAVE_GRANTPT)
++
++#ifdef HAVE_STROPTS_H
++#    include <stropts.h>
++#endif
++
++static int
++pty_open_slave (const char *pty_name)
++{
++	int pty_slave = open (pty_name, O_RDWR);
++
++	if (pty_slave == -1)
++		return -1;
++
++#ifdef HAVE_STROPTS_H
++#if !defined(__osf__)
++	if (!ioctl (pty_slave, I_FIND, "ptem"))
++		if (ioctl (pty_slave, I_PUSH, "ptem") == -1){
++			close (pty_slave);
++			return -1;
++		}
++
++    if (!ioctl (pty_slave, I_FIND, "ldterm"))
++	    if (ioctl (pty_slave, I_PUSH, "ldterm") == -1){
++		    close (pty_slave);
++		    return -1;
++	    }
++
++#if !defined(sgi) && !defined(__sgi)
++    if (!ioctl (pty_slave, I_FIND, "ttcompat"))
++	    if (ioctl (pty_slave, I_PUSH, "ttcompat") == -1)
++	    {
++		    perror ("ioctl (pty_slave, I_PUSH, \"ttcompat\")");
++		    close (pty_slave);
++		    return -1;
++	    }
++#endif /* sgi || __sgi */
++#endif /* __osf__ */
++#endif /* HAVE_STROPTS_H */
++
++    return pty_slave;
++}
++
++static int
++pty_open_master (char *pty_name, int *used_bsd)
++{
++	int pty_master;
++	char *slave_name;
++
++	strcpy (pty_name, "/dev/ptmx");
++
++	pty_master = open (pty_name, O_RDWR);
++
++	if ((pty_master == -1) && (errno == ENOENT)) {
++		strcpy (pty_name, "/dev/ptc"); /* AIX */
++		pty_master = open (pty_name, O_RDWR);
++	}
++
++	/*
++	 * Try BSD open, this is needed for Linux which
++	 * might have Unix98 devices but no kernel support
++	 * for those.
++	 */
++	if (pty_master == -1) {
++		*used_bsd = 1;
++		return pty_open_master_bsd (pty_name, used_bsd);
++	}
++	*used_bsd = 0;
++
++	if (grantpt (pty_master) == -1 || unlockpt (pty_master) == -1) {
++		close (pty_master);
++		return -1;
++	}
++	if ((slave_name = ptsname (pty_master)) == NULL){
++		close (pty_master);
++		return -1;
++	}
++	strcpy (pty_name, slave_name);
++	return pty_master;
++}
++#else
++#    define pty_open_master pty_open_master_bsd
++#    define pty_open_slave  pty_open_slave_bsd
++#endif
++
++int
++openpty (int *master_fd, int *slave_fd, char *name,
++	 struct termios *termp, struct winsize *winp)
++{
++	int pty_master, pty_slave, used_bsd = 0;
++	struct group *group_info;
++	char line [256];
++
++	pty_master = pty_open_master (line, &used_bsd);
++	fcntl (pty_master, F_SETFD, FD_CLOEXEC);
++
++	if (pty_master == -1)
++		return -1;
++
++	group_info = getgrnam ("tty");
++
++	if (group_info != NULL){
++		chown (line, getuid (), group_info->gr_gid);
++		chmod (line, S_IRUSR | S_IWUSR | S_IWGRP);
++	} else {
++		chown (line, getuid (), -1);
++		chmod (line, S_IRUSR | S_IWUSR | S_IWGRP);
++	}
++
++#ifdef HAVE_REVOKE
++	revoke (line);
++#endif
++
++	/* Open slave side */
++	if (used_bsd)
++		pty_slave = pty_open_slave_bsd (line);
++	else
++		pty_slave = pty_open_slave (line);
++
++	if (pty_slave == -1){
++		close (pty_master);
++
++		errno = ENOENT;
++		return -1;
++	}
++	fcntl (pty_slave, F_SETFD, FD_CLOEXEC);
++
++	*master_fd = pty_master;
++	*slave_fd  = pty_slave;
++
++	if (termp)
++		tcsetattr (pty_slave, TCSAFLUSH, termp);
++
++	if (winp)
++		ioctl (pty_slave, TIOCSWINSZ, winp);
++
++	if (name)
++		strcpy (name, line);
++
++	return 0;
++}
++
++pid_t
++forkpty (int *master_fd, char *name, struct termios *termp, struct winsize *winp)
++{
++	int master, slave;
++	pid_t pid;
++
++	if (openpty (&master, &slave, name, termp, winp) == -1)
++		return -1;
++
++	pid = fork ();
++
++	if (pid == -1)
++		return -1;
++
++	/* Child */
++	if (pid == 0){
++		close (master);
++		login_tty (slave);
++	} else {
++		*master_fd = master;
++		close (slave);
++	}
++
++	return pid;
++}
++#endif /* HAVE_OPENPTY */
++
++int
++n_read (int fd, void *buf, int count)
++{
++	int n = 0, i;
++	char *buffer;
++
++	buffer = (char*) buf;
++	while (n < count) {
++		i = read (fd, buffer + n, count - n);
++		switch (i) {
++		case -1:
++			switch (errno) {
++			case EINTR:
++			case EAGAIN:
++#ifdef ERESTART
++			case ERESTART:
++#endif
++				/* suppress these errors */
++				break;
++			default:
++				return -1;
++				break;
++			}
++			break;
++		case 0:
++			return n;
++			break;
++		default:
++			n += i;
++			break;
++		}
++	}
++
++	return n;
++}
++
++int
++n_write (int fd, const void *buf, int count)
++{
++	int n = 0, i;
++	const char *buffer;
++
++	buffer = (char*) buf;
++	while (n < count) {
++		i = write (fd, buffer + n, count - n);
++		switch (i) {
++		case -1:
++			switch (errno) {
++			case EINTR:
++			case EAGAIN:
++#ifdef ERESTART
++			case ERESTART:
++#endif
++				/* suppress these errors */
++				break;
++			default:
++				return -1;
++				break;
++			}
++			break;
++		case 0:
++			return n;
++			break;
++		default:
++			n += i;
++			break;
++		}
++	}
++
++	return n;
++}
+diff --git a/gnome-pty-helper/gnome-login-support.h b/gnome-pty-helper/gnome-login-support.h
+new file mode 100644
+index 000000000000..cc80a46ff3b1
+--- /dev/null
++++ b/gnome-pty-helper/gnome-login-support.h
+@@ -0,0 +1,39 @@
++#ifndef _GNOME_LOGIN_SUPPORT_H
++#define _GNOME_LOGIN_SUPPORT_H
++
++#ifdef HAVE_OPENPTY
++#if defined(HAVE_PTY_H)
++#    include <pty.h>
++#elif defined(HAVE_UTIL_H) /* OpenBSD */
++#    include <util.h>
++#elif defined(HAVE_LIBUTIL_H) /* FreeBSD */
++#    include <libutil.h>
++#elif defined(HAVE_LIBUTIL) /* BSDI has libutil, but no libutil.h */
++/* Avoid pulling in all the include files for no need */
++struct termios;
++struct winsize;
++struct utmp;
++	    
++void login (struct utmp *ut);
++int  login_tty (int fd);
++int  logout (char *line);
++void logwtmp (const char *line, const char *name, const char *host);
++int  openpty (int *amaster, int *aslave, char *name, struct termios *termp, struct winsize *winp);
++int  forkpty (int *amaster, char *name, struct termios *termp, struct winsize *winp);
++#endif
++#else
++int openpty (int *master_fd, int *slavefd, char *name, struct termios *termp, struct winsize *winp);
++pid_t forkpty (int *master_fd, char *name, struct termios *termp, struct winsize *winp);
++#endif
++
++#ifndef HAVE_LOGIN_TTY
++int login_tty (int fd);
++#elif defined(HAVE_UTMP_H)
++/* Get the prototype from utmp.h */
++#include <utmp.h>
++#endif
++
++int n_read (int fd, void *buffer, int size);
++int n_write (int fd, const void *buffer, int size);
++
++#endif /* _GNOME_LOGIN_SUPPORT_H */
+diff --git a/gnome-pty-helper/gnome-pty-helper.c b/gnome-pty-helper/gnome-pty-helper.c
+new file mode 100644
+index 000000000000..2666bf4cd46d
+--- /dev/null
++++ b/gnome-pty-helper/gnome-pty-helper.c
+@@ -0,0 +1,751 @@
++/*
++ * gnome-pty.c:  Helper setuid application used to open a pseudo-
++ * terminal, set the permissions, ownership and record user login
++ * information
++ *
++ * Author:
++ *    Miguel de Icaza (miguel@gnu.org)
++ *
++ * Parent application talks to us via a couple of sockets that are strategically
++ * placed on file descriptors 0 and 1 (STDIN_FILENO and STDOUT_FILENO).
++ *
++ * We use the STDIN_FILENO to read and write the protocol information and we use
++ * the STDOUT_FILENO to pass the file descriptors (we need two different file
++ * descriptors as using a socket for both data transfers and file descriptor
++ * passing crashes some BSD kernels according to Theo de Raadt)
++ *
++ * A sample protocol is used:
++ *
++ * OPEN_PTY             => 1 <tag> <master-pty-fd> <slave-pty-fd>
++ *                      => 0
++ *
++ * CLOSE_PTY  <tag>     => void
++ *
++ * <tag> is a pointer.  If tag is NULL, then the ptys were not allocated.
++ * ptys are passed using file descriptor passing on the stdin file descriptor
++ *
++ * We use as little as possible external libraries.
++ */
++#include <config.h>
++
++/* Use this to pull SCM_RIGHTS definition on IRIX */
++#if defined(irix) || defined (__irix__) || defined(sgi) || defined (__sgi__)
++#    define _XOPEN_SOURCE 1
++extern char *strdup(const char *);
++#endif
++
++#include <sys/types.h>
++#include <sys/time.h>
++#include <sys/resource.h>
++#include <sys/stat.h>
++#include <limits.h>
++#include <unistd.h>
++#include <string.h>
++#include <signal.h>
++#include <sys/param.h>
++#include <fcntl.h>
++#include <termios.h>
++#include <errno.h>
++#include <termios.h>
++#include <pwd.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdio.h>
++#include <utmp.h>
++#include <grp.h>
++#include "gnome-pty.h"
++#include "gnome-login-support.h"
++
++/* For PATH_MAX on BSD-like systems. */
++#ifdef HAVE_SYS_SYSLIMITS_H
++#include <sys/syslimits.h>
++#endif
++
++static struct passwd *pwent;
++static char login_name_buffer [48];
++static char *login_name, *display_name;
++
++struct pty_info {
++	char   *login_name;
++	struct pty_info *next;
++	char   *line;
++	void   *data;
++	char   utmp, wtmp, lastlog;
++};
++
++typedef struct pty_info pty_info;
++
++static pty_info *pty_list;
++
++#ifdef HAVE_SENDMSG
++#include <sys/socket.h>
++#include <sys/uio.h>
++
++#ifdef HAVE_SYS_UN_H /* Linux libc5 */
++#include <sys/un.h>
++#endif
++
++#ifndef CMSG_DATA /* Linux libc5 */
++/* Ancillary data object manipulation macros.  */
++#if !defined __STRICT_ANSI__ && defined __GNUC__ && __GNUC__ >= 2
++# define CMSG_DATA(cmsg) ((cmsg)->cmsg_data)
++#else
++# define CMSG_DATA(cmsg) ((unsigned char *) ((struct cmsghdr *) (cmsg) + 1))
++#endif
++#endif /* CMSG_DATA */
++
++/* Solaris doesn't define these */
++#ifndef CMSG_ALIGN
++#define CMSG_ALIGN(len) (((len) + sizeof (size_t) - 1) & (size_t) ~(sizeof (size_t) - 1))
++#endif
++#ifndef CMSG_SPACE
++#define CMSG_SPACE(len) (CMSG_ALIGN (len) + CMSG_ALIGN (sizeof (struct cmsghdr)))
++#endif
++#ifndef CMSG_LEN
++#define CMSG_LEN(len) (CMSG_ALIGN (sizeof (struct cmsghdr)) + (len))
++#endif
++
++static int
++pass_fd (int client_fd, int fd)
++{
++        struct iovec  iov[1];
++        struct msghdr msg;
++        char          buf [1];
++        char    cmsgbuf[CMSG_SPACE(sizeof(int))];
++        struct  cmsghdr *cmptr;
++        int *fdptr;
++
++	iov [0].iov_base = buf;
++	iov [0].iov_len  = 1;
++
++	msg.msg_iov        = iov;
++	msg.msg_iovlen     = 1;
++	msg.msg_name       = NULL;
++	msg.msg_namelen    = 0;
++	msg.msg_control    = (caddr_t) cmsgbuf;
++	msg.msg_controllen = sizeof(cmsgbuf);
++
++        cmptr = CMSG_FIRSTHDR(&msg);
++	cmptr->cmsg_level = SOL_SOCKET;
++	cmptr->cmsg_type  = SCM_RIGHTS;
++	cmptr->cmsg_len   = CMSG_LEN(sizeof(int));
++        fdptr = (int *) CMSG_DATA(cmptr);
++        memcpy (fdptr, &fd, sizeof(int));
++	if (sendmsg (client_fd, &msg, 0) != 1)
++		return -1;
++
++	return 0;
++}
++
++#elif defined(__sgi) && !defined(HAVE_SENDMSG)
++
++/*
++ * IRIX 6.2 is like 4.3BSD; it will not have HAVE_SENDMSG set,
++ * because msghdr used msg_accrights and msg_accrightslen rather
++ * than the newer msg_control and msg_controllen fields configure
++ * checks.  The SVR4 code below doesn't work because pipe()
++ * semantics are controlled by the svr3pipe systune variable,
++ * which defaults to uni-directional pipes.  Also sending
++ * file descriptors through pipes isn't implemented.
++ */
++
++#include <sys/socket.h>
++#include <sys/uio.h>
++
++static int
++pass_fd (int client_fd, int fd)
++{
++  struct iovec  iov[1];
++  struct msghdr msg;
++  char          buf [1];
++
++  iov [0].iov_base = buf;
++  iov [0].iov_len  = 1;
++
++  msg.msg_iov        = iov;
++  msg.msg_iovlen     = 1;
++  msg.msg_name       = NULL;
++  msg.msg_namelen    = 0;
++  msg.msg_accrights    = (caddr_t) &fd;
++  msg.msg_accrightslen = sizeof(fd);
++
++  if (sendmsg (client_fd, &msg, 0) != 1)
++    return -1;
++
++  return 0;
++}
++
++#else
++#include <stropts.h>
++#ifdef I_SENDFD
++
++int
++pass_fd (int client_fd, int fd)
++{
++	if (ioctl (client_fd, I_SENDFD, fd) < 0)
++		return -1;
++	return 0;
++}
++#endif
++#endif
++
++static void
++pty_free (pty_info *pi)
++{
++	free (pi);
++}
++
++static void
++pty_remove (pty_info *pi)
++{
++	pty_info *l, *last;
++
++	last = (void *) 0;
++
++	for (l = pty_list; l; l = l->next) {
++		if (l == pi) {
++			if (last == (void *) 0)
++				pty_list = pi->next;
++			else
++				last->next = pi->next;
++			free (pi->line);
++			free (pi->login_name);
++			pty_free (pi);
++			return;
++		}
++		last = l;
++	}
++
++	exit (1);
++}
++
++static void
++shutdown_pty (pty_info *pi)
++{
++	if (pi->utmp || pi->wtmp || pi->lastlog)
++		if (pi->data)
++			write_logout_record (pi->login_name, pi->data, pi->utmp, pi->wtmp);
++
++	pty_remove (pi);
++}
++
++static void
++shutdown_helper (void)
++{
++	pty_info *pi;
++
++	for (pi = pty_list; pi; pi = pty_list)
++		shutdown_pty (pi);
++}
++
++static pty_info *
++pty_add (int utmp, int wtmp, int lastlog, char *line, char *login_name)
++{
++	pty_info *pi = malloc (sizeof (pty_info));
++
++	if (pi == NULL) {
++		shutdown_helper ();
++		exit (1);
++	}
++
++	memset (pi, 0, sizeof (pty_info));
++
++	if (strncmp (line, "/dev/", 5))
++		pi->line = strdup (line);
++	else
++		pi->line = strdup (line+5);
++
++	if (pi->line == NULL) {
++		shutdown_helper ();
++		exit (1);
++	}
++
++	pi->next = pty_list;
++	pi->utmp = utmp;
++	pi->wtmp = wtmp;
++	pi->lastlog = lastlog;
++	pi->login_name = strdup (login_name);
++
++	pty_list = pi;
++
++	return pi;
++}
++
++static struct termios*
++init_term_with_defaults(struct termios* term)
++{
++	/*
++	 *	openpty assumes POSIX termios so this should be portable.
++	 *	Don't change this to a structure init - POSIX doesn't say
++	 *	anything about field order.
++	 */
++	memset(term, 0, sizeof(struct termios));
++
++	term->c_iflag = 0
++#ifdef BRKINT
++	  | BRKINT
++#endif
++#ifdef ICRNL
++	  | ICRNL
++#endif
++#ifdef IMAXBEL
++	  | IMAXBEL
++#endif
++#ifdef IXON
++	  | IXON
++#endif
++#ifdef IXANY
++	  | IXANY
++#endif
++	  ;
++	term->c_oflag = 0
++#ifdef OPOST
++	  | OPOST
++#endif
++#ifdef ONLCR
++	  | ONLCR
++#endif
++#ifdef NL0
++	  | NL0
++#endif
++#ifdef CR0
++	  | CR0
++#endif
++#ifdef TAB0
++	  | TAB0
++#endif
++#ifdef BS0
++	  | BS0
++#endif
++#ifdef VT0
++	  | VT0
++#endif
++#ifdef FF0
++	  | FF0
++#endif
++	  ;
++	term->c_cflag = 0
++#ifdef CREAD
++	  | CREAD
++#endif
++#ifdef CS8
++	  | CS8
++#endif
++#ifdef HUPCL
++	  | HUPCL
++#endif
++	  ;
++#ifdef EXTB
++	cfsetispeed(term, EXTB);
++	cfsetospeed(term, EXTB);
++#else
++#   ifdef B38400
++        cfsetispeed(term, B38400);
++        cfsetospeed(term, B38400);
++#   else
++#       ifdef B9600
++        cfsetispeed(term, B9600);
++        cfsetospeed(term, B9600);
++#       endif
++#   endif
++#endif /* EXTB */
++
++	term->c_lflag = 0
++#ifdef ECHO
++	  | ECHO
++#endif
++#ifdef ICANON
++	  | ICANON
++#endif
++#ifdef ISIG
++	  | ISIG
++#endif
++#ifdef IEXTEN
++	  | IEXTEN
++#endif
++#ifdef ECHOE
++	  | ECHOE
++#endif
++#ifdef ECHOKE
++	  | ECHOKE
++#endif
++#ifdef ECHOK
++	  | ECHOK
++#endif
++#ifdef ECHOCTL
++	  | ECHOCTL
++#endif
++	  ;
++
++#ifdef N_TTY
++	/* should really be a check for c_line, but maybe this is good enough */
++	term->c_line = N_TTY;
++#endif
++
++	/* These two may overlap so set them first */
++	/* That setup means, that read() will be blocked until  */
++	/* at least 1 symbol will be read.                      */
++	term->c_cc[VMIN]  = 1;
++	term->c_cc[VTIME] = 0;
++
++	/*
++	 * Now set the characters. This is of course a religious matter
++	 * but we use the defaults, with erase bound to the key gnome-terminal
++	 * maps.
++	 *
++	 * These are the ones set by "stty sane".
++	 */
++
++	term->c_cc[VINTR]  = 'C'-64;
++	term->c_cc[VQUIT]  = '\\'-64;
++	term->c_cc[VERASE] = 127;
++	term->c_cc[VKILL]  = 'U'-64;
++	term->c_cc[VEOF]   = 'D'-64;
++#ifdef VSWTC
++	term->c_cc[VSWTC]  = 255;
++#endif
++	term->c_cc[VSTART] = 'Q'-64;
++	term->c_cc[VSTOP]  = 'S'-64;
++	term->c_cc[VSUSP]  = 'Z'-64;
++	term->c_cc[VEOL]   = 255;
++
++	/*
++	 *	Extended stuff.
++	 */
++
++#ifdef VREPRINT
++	term->c_cc[VREPRINT] = 'R'-64;
++#endif
++#ifdef VSTATUS
++	term->c_cc[VSTATUS]  = 'T'-64;
++#endif
++#ifdef VDISCARD
++	term->c_cc[VDISCARD] = 'O'-64;
++#endif
++#ifdef VWERASE
++	term->c_cc[VWERASE]  = 'W'-64;
++#endif
++#ifdef VLNEXT
++	term->c_cc[VLNEXT]   = 'V'-64;
++#endif
++#ifdef VDSUSP
++	term->c_cc[VDSUSP]   = 'Y'-64;
++#endif
++#ifdef VEOL2
++	term->c_cc[VEOL2]    = 255;
++#endif
++    return term;
++}
++
++static int
++open_ptys (int utmp, int wtmp, int lastlog)
++{
++	const char *term_name;
++	int status, master_pty, slave_pty;
++	pty_info *p;
++	int result;
++	uid_t savedUid;
++	gid_t savedGid;
++	struct group *group_info;
++	struct termios term;
++
++	/* Initialize term */
++	init_term_with_defaults(&term);
++
++	/* root privileges */
++	savedUid = geteuid();
++	savedGid = getegid();
++
++	/* drop privileges to the user level */
++#if defined(HAVE_SETEUID)
++	seteuid (pwent->pw_uid);
++	setegid (pwent->pw_gid);
++#elif defined(HAVE_SETREUID)
++	setreuid (savedUid, pwent->pw_uid);
++	setregid (savedGid, pwent->pw_gid);
++#else
++#error "No means to drop privileges! Huge security risk! Won't compile."
++#endif
++	/* Open pty with privileges of the user */
++	status = openpty (&master_pty, &slave_pty, NULL, &term, NULL);
++
++	/* Restore saved privileges to root */
++#ifdef HAVE_SETEUID
++	seteuid (savedUid);
++	setegid (savedGid);
++#elif defined(HAVE_SETREUID)
++	setreuid (pwent->pw_uid, savedUid);
++	setregid (pwent->pw_gid, savedGid);
++#else
++#error "No means to raise privileges! Huge security risk! Won't compile."
++#endif
++	/* openpty() failed, reject request */
++	if (status == -1 || (term_name = ttyname(slave_pty)) == NULL) {
++		result = 0;
++		n_write (STDIN_FILENO, &result, sizeof (result));
++		return 0;
++	}
++
++	/* a bit tricky, we re-do the part of the openpty()  */
++	/* that required root privileges, and, hence, failed */
++	group_info = getgrnam ("tty");
++	fchown (slave_pty, getuid (), group_info ? group_info->gr_gid : -1);
++	fchmod (slave_pty, S_IRUSR | S_IWUSR | S_IWGRP);
++	/* It's too late to call revoke at this time... */
++	/* revoke(term_name); */
++
++	/* add pty to the list of allocated by us */
++	p = pty_add (utmp, wtmp, lastlog, term_name, login_name);
++	result = 1;
++
++	if (n_write (STDIN_FILENO, &result, sizeof (result)) != sizeof (result) ||
++	    n_write (STDIN_FILENO, &p, sizeof (p)) != sizeof (p) ||
++	    pass_fd (STDOUT_FILENO, master_pty)  == -1 ||
++	    pass_fd (STDOUT_FILENO, slave_pty)   == -1) {
++		exit (0);
++	}
++
++	if (utmp || wtmp || lastlog) {
++		p->data = write_login_record (login_name, display_name,
++					      term_name, utmp, wtmp, lastlog);
++	}
++
++	close (master_pty);
++	close (slave_pty);
++
++	return 1;
++}
++
++static void
++close_pty_pair (void *tag)
++{
++	pty_info *pi;
++
++	for (pi = pty_list; pi; pi = pi->next) {
++		if (tag == pi) {
++			shutdown_pty (pi);
++			break;
++		}
++	}
++}
++
++#define MB (1024*1024)
++
++struct {
++	int limit;
++	int value;
++} sensible_limits [] = {
++	{ RLIMIT_CPU,    120 },
++	{ RLIMIT_FSIZE,  1 * MB },
++	{ RLIMIT_DATA,   1 * MB },
++	{ RLIMIT_STACK,  1 * MB },
++#ifdef RLIMIT_AS
++	{ RLIMIT_AS,     1 * MB },
++#endif
++	{ RLIMIT_NOFILE, 10 },
++#ifdef RLIMIT_NPROC
++	{ RLIMIT_NPROC,  5 },
++#endif
++	{ -1, -1 }
++};
++
++static void
++sanity_checks (void)
++{
++	int stderr_fd;
++	int i, open_max;
++	int flag;
++
++	/*
++	 * Make sure stdin/stdout are open.  This is a requirement
++	 * for our program to work and closes potential security holes.
++	 */
++	if ((fcntl (0, F_GETFL, &flag) == -1 && errno == EBADF) ||
++	    (fcntl (1, F_GETFL, &flag) == -1 && errno == EBADF)) {
++		exit (1);
++	}
++
++	/*
++	 * File descriptors 0 and 1 have been setup by the parent process
++	 * to be used for the protocol exchange and for transfering
++	 * file descriptors.
++	 *
++	 * Make stderr point to a terminal.
++	 */
++	if (fcntl (2, F_GETFL, &flag) == -1 && errno == EBADF) {
++		stderr_fd = open ("/dev/tty", O_RDWR);
++		if (stderr_fd == -1) {
++			stderr_fd = open ("/dev/null", O_RDWR);
++			if (stderr_fd == -1)
++				exit (1);
++		}
++
++		if (stderr_fd != 2)
++			while (dup2 (stderr_fd, 2) == -1 && errno == EINTR)
++				;
++	}
++
++	/* Close any file descriptor we do not use */
++	open_max = sysconf (_SC_OPEN_MAX);
++	for (i = 3; i < open_max; i++) {
++		close (i);
++	}
++
++	/* Check sensible resource limits */
++	for (i = 0; sensible_limits [i].value != -1; i++) {
++		struct rlimit rlim;
++
++		if (getrlimit (sensible_limits [i].limit, &rlim) != 0)
++			continue;
++
++		if (rlim.rlim_cur != RLIM_INFINITY &&
++		    rlim.rlim_cur < sensible_limits [i].value) {
++			if (setrlimit (sensible_limits [i].limit, &rlim) != 0) {
++				fprintf (stderr, "Living environment not ok\n");
++				exit (1);
++			}
++		}
++	}
++
++	/* Make sure SIGIO/SIGINT is SIG_IGN */
++	{
++		struct sigaction sa;
++		sigset_t sigset;
++
++		sa.sa_handler = SIG_IGN;
++		sigemptyset (&sa.sa_mask);
++		sa.sa_flags = 0;
++
++		sigemptyset(&sigset);
++		sigaddset(&sigset, SIGIO);
++		sigaddset(&sigset, SIGINT);
++		sigprocmask(SIG_UNBLOCK, &sigset, NULL);
++
++		sigaction (SIGIO, &sa, NULL);
++		sigaction (SIGINT, &sa, NULL);
++	}
++}
++
++static volatile int done;
++
++static void
++exit_handler (int signum)
++{
++	done = 1;
++}
++
++
++int
++main (int argc, char *argv [])
++{
++	int res, n;
++	void *tag;
++	GnomePtyOps op;
++	const char *logname;
++
++	sanity_checks ();
++
++	pwent = NULL;
++
++	logname = getenv ("LOGNAME");
++	if (logname != NULL) {
++		pwent = getpwnam (logname);
++		if (pwent != NULL && pwent->pw_uid != getuid ()) {
++			/* LOGNAME is lying, fall back to looking up the uid */
++			pwent = NULL;
++		}
++	}
++
++	if (pwent == NULL)
++		pwent = getpwuid (getuid ());
++
++	if (pwent)
++		login_name = pwent->pw_name;
++	else {
++		sprintf (login_name_buffer, "#%u", (unsigned int)getuid ());
++		login_name = login_name_buffer;
++	}
++
++        /* Change directory so we don't prevent unmounting in case the initial cwd
++         * is on an external device (see bug #574491). 
++         */
++	if (chdir ("/") < 0)
++                fprintf (stderr, "Failed to chdir to /: %s\n", strerror (errno));
++ 
++	display_name = getenv ("DISPLAY");
++	if (!display_name)
++		display_name = "localhost";
++
++	done = 0;
++
++	/* Make sure we clean up utmp/wtmp even under vncserver */
++	signal (SIGHUP, exit_handler);
++	signal (SIGTERM, exit_handler);
++
++	while (!done) {
++		res = n_read (STDIN_FILENO, &op, sizeof (op));
++
++		if (res != sizeof (op)) {
++			done = 1;
++			continue;
++		}
++
++		switch (op) {
++		case GNOME_PTY_OPEN_PTY_UTMP:
++			open_ptys (1, 0, 0);
++			break;
++
++		case GNOME_PTY_OPEN_PTY_UWTMP:
++			open_ptys (1, 1, 0);
++			break;
++
++		case GNOME_PTY_OPEN_PTY_WTMP:
++			open_ptys (0, 1, 0);
++			break;
++
++		case GNOME_PTY_OPEN_PTY_LASTLOG:
++			open_ptys (0, 0, 1);
++			break;
++
++		case GNOME_PTY_OPEN_PTY_LASTLOGUTMP:
++			open_ptys (1, 0, 1);
++			break;
++
++		case GNOME_PTY_OPEN_PTY_LASTLOGUWTMP:
++			open_ptys (1, 1, 1);
++			break;
++
++		case GNOME_PTY_OPEN_PTY_LASTLOGWTMP:
++			open_ptys (0, 1, 1);
++			break;
++
++		case GNOME_PTY_OPEN_NO_DB_UPDATE:
++			open_ptys (0, 0, 0);
++			break;
++
++		case GNOME_PTY_RESET_TO_DEFAULTS:
++			break;
++
++		case GNOME_PTY_CLOSE_PTY:
++			n = n_read (STDIN_FILENO, &tag, sizeof (tag));
++			if (n != sizeof (tag)) {
++				shutdown_helper ();
++				exit (1);
++			}
++			close_pty_pair (tag);
++			break;
++
++		case GNOME_PTY_SYNCH:
++			{
++				int result = 0;
++				n_write (STDIN_FILENO, &result, 1);
++			}
++			break;
++		}
++
++	}
++
++	shutdown_helper ();
++	return 0;
++}
++
+diff --git a/gnome-pty-helper/gnome-pty.h b/gnome-pty-helper/gnome-pty.h
+new file mode 100644
+index 000000000000..94f94f95e248
+--- /dev/null
++++ b/gnome-pty-helper/gnome-pty.h
+@@ -0,0 +1,22 @@
++#ifndef GNOME_PTY_H
++#define GNOME_PTY_H
++
++typedef enum {
++	GNOME_PTY_OPEN_PTY_UTMP = 1,
++	GNOME_PTY_OPEN_PTY_UWTMP,
++	GNOME_PTY_OPEN_PTY_WTMP,
++	GNOME_PTY_OPEN_PTY_LASTLOG,
++	GNOME_PTY_OPEN_PTY_LASTLOGUTMP,
++	GNOME_PTY_OPEN_PTY_LASTLOGUWTMP,
++	GNOME_PTY_OPEN_PTY_LASTLOGWTMP,
++	GNOME_PTY_OPEN_NO_DB_UPDATE,
++	GNOME_PTY_RESET_TO_DEFAULTS,
++	GNOME_PTY_CLOSE_PTY,
++	GNOME_PTY_SYNCH
++} GnomePtyOps;
++
++void *update_dbs         (int utmp, int wtmp, int lastlog, char *login_name, char *display_name, char *term_name);
++void *write_login_record (char *login_name, char *display_name, char *term_name, int utmp, int wtmp, int lastlog);
++void write_logout_record (char *login_name, void *data, int utmp, int wtmp);
++
++#endif
+diff --git a/gnome-pty-helper/gnome-utmp.c b/gnome-pty-helper/gnome-utmp.c
+new file mode 100644
+index 000000000000..1a090ec8ee38
+--- /dev/null
++++ b/gnome-pty-helper/gnome-utmp.c
+@@ -0,0 +1,374 @@
++/*
++ * utmp/wtmp file updating
++ *
++ * Authors:
++ *    Miguel de Icaza (miguel@gnu.org).
++ *    Timur I. Bakeyev (timur@gnu.org).
++ *
++ * FIXME: Do we want to register the PID of the process running *under* the
++ * subshell or the PID of the parent process? (we are doing the latter now).
++ *
++ * FIXME: Solaris (utmpx) stuff need to be checked.
++ */
++
++#include <config.h>
++#include <sys/types.h>
++#include <sys/file.h>
++#include <stdio.h>
++#include <unistd.h>
++#include <stdlib.h>
++#include <string.h>
++#include <fcntl.h>
++#include <pwd.h>
++#include <errno.h>
++
++#if defined(TIME_WITH_SYS_TIME)
++#    include <sys/time.h>
++#include <time.h>
++#else
++#  if defined(HAVE_SYS_TIME_H)
++#    include <sys/time.h>
++#  else
++#    include <time.h>
++#  endif
++#endif
++
++#if defined(HAVE_LASTLOG_H)
++#    include <lastlog.h>
++#endif
++
++#if defined(HAVE_PATHS_H)
++#    include <paths.h>
++#endif
++
++#if defined(HAVE_UTMP_H)
++#    include <utmp.h>
++#endif
++
++#if defined(HAVE_UTMPX_H)
++#    include <utmpx.h>
++#endif
++
++#if defined(HAVE_TTYENT_H)
++#    include <ttyent.h>
++#endif
++
++#include "gnome-pty.h"
++#include "gnome-login-support.h"
++
++
++
++#if !defined(UTMP_OUTPUT_FILENAME)
++#    if defined(UTMP_FILE)
++#        define UTMP_OUTPUT_FILENAME UTMP_FILE
++#    elif defined(_PATH_UTMP) /* BSD systems */
++#        define UTMP_OUTPUT_FILENAME _PATH_UTMP
++#    else
++#        define UTMP_OUTPUT_FILENAME "/etc/utmp"
++#    endif
++#endif
++
++#if !defined(WTMP_OUTPUT_FILENAME)
++#    if defined(WTMPX_FILE)
++#        define WTMP_OUTPUT_FILENAME WTMPX_FILE
++#    elif defined(_PATH_WTMPX)
++#        define WTMP_OUTPUT_FILENAME _PATH_WTMPX
++#    elif defined(WTMPX_FILENAME)
++#        define WTMP_OUTPUT_FILENAME WTMPX_FILENAME
++#    elif defined(WTMP_FILE)
++#        define WTMP_OUTPUT_FILENAME WTMP_FILE
++#    elif defined(_PATH_WTMP) /* BSD systems */
++#        define WTMP_OUTPUT_FILENAME _PATH_WTMP
++#    else
++#        define WTMP_OUTPUT_FILENAME "/etc/wtmp"
++#    endif
++#endif
++
++#if defined(_PATH_LASTLOG) /* BSD systems */
++#    define LASTLOG_OUTPUT_FILE	_PATH_LASTLOG
++#else
++#    define LASTLOG_OUTPUT_FILE	"/var/log/lastlog"
++#endif
++
++#if defined(HAVE_UPDWTMPX)
++#include <utmpx.h>
++#define update_wtmp updwtmpx
++#elif defined(HAVE_UPDWTMP)
++#define update_wtmp updwtmp
++#else /* !HAVE_UPDWTMPX && !HAVE_UPDWTMP */
++static void
++update_wtmp (char *file, UTMP *putmp)
++{
++	int fd, times = 3;
++#if defined(HAVE_FCNTL)
++	struct flock lck;
++
++	lck.l_whence = SEEK_END;
++	lck.l_len    = 0;
++	lck.l_start  = 0;
++	lck.l_type   = F_WRLCK;
++#endif
++
++	if ((fd = open (file, O_WRONLY|O_APPEND, 0)) < 0)
++		return;
++
++#if defined (HAVE_FCNTL)
++	while (times--)
++	  if ((fcntl (fd, F_SETLK, &lck) < 0))
++	    {
++	      if (errno != EAGAIN && errno != EACCES) {
++		close (fd);
++		return;
++	      }
++	      sleep (1); /*?!*/
++	    } else
++	      break;
++#elif defined(HAVE_FLOCK)
++	while (times--)
++	  if (flock (fd, LOCK_EX | LOCK_NB) < 0)
++	    {
++	      if (errno != EWOULDBLOCK)
++		{
++		  close (fd);
++		  return;
++		}
++	      sleep (1); /*?!*/
++	    } else
++	      break;
++#endif /* HAVE_FLOCK */
++
++	lseek (fd, 0, SEEK_END);
++	write (fd, putmp, sizeof(UTMP));
++
++	/* unlock the file */
++#if defined(HAVE_FCNTL)
++	lck.l_type = F_UNLCK;
++	fcntl (fd, F_SETLK, &lck);
++#elif defined(HAVE_FLOCK)
++	flock (fd, LOCK_UN);
++#endif
++	close (fd);
++}
++#endif /* !HAVE_GETUTMPX */
++
++
++#if defined(HAVE_GETUTMPX)
++static void
++update_utmp (UTMP *ut)
++{
++	setutxent();
++	pututxline (ut);
++	endutxent();
++}
++#elif defined(HAVE_GETUTENT)
++static void
++update_utmp (UTMP *ut)
++{
++	setutent();
++	pututline (ut);
++	endutent();
++}
++#elif defined(HAVE_GETTTYENT)
++/* This variant is sutable for most BSD */
++static void
++update_utmp (UTMP *ut)
++{
++	struct ttyent *ty;
++	int fd, pos = 0;
++
++	if ((fd = open (UTMP_OUTPUT_FILENAME, O_RDWR|O_CREAT, 0644)) < 0)
++		return;
++
++	setttyent ();
++	while ((ty = getttyent ()) != NULL)
++	{
++		++pos;
++		if (strncmp (ty->ty_name, ut->ut_line, sizeof (ut->ut_line)) == 0)
++		{
++			lseek (fd, (off_t)(pos * sizeof(UTMP)), SEEK_SET);
++			write(fd, ut, sizeof(UTMP));
++		}
++	}
++	endttyent ();
++
++	close(fd);
++}
++#else
++#define update_utmp(ut)
++#endif
++
++#if !defined(HAVE_LASTLOG)
++#define update_lastlog(login_name, ut)
++#else
++static void
++update_lastlog(char* login_name, UTMP *ut)
++{
++    struct passwd *pwd;
++    struct lastlog ll;
++    int fd;
++
++    if ((fd = open(LASTLOG_OUTPUT_FILE, O_WRONLY, 0)) < 0)
++	return;
++
++    if ((pwd=getpwnam(login_name)) == NULL)
++	return;
++
++    memset (&ll, 0, sizeof(ll));
++
++    lseek (fd, (off_t)pwd->pw_uid * sizeof (ll), SEEK_SET);
++
++    time (&ll.ll_time);
++
++    strncpy (ll.ll_line, ut->ut_line, sizeof (ll.ll_line));
++
++#if defined(HAVE_UT_UT_HOST)
++    if (ut->ut_host)
++	strncpy (ll.ll_host, ut->ut_host, sizeof (ll.ll_host));
++#endif
++
++    write (fd, (void *)&ll, sizeof (ll));
++    close (fd);
++}
++#endif /* HAVE_LASTLOG */
++
++void
++write_logout_record (char *login_name, void *data, int utmp, int wtmp)
++{
++	UTMP put, *ut = data;
++	struct timeval tv;
++
++	memset (&put, 0, sizeof(UTMP));
++
++#if defined(HAVE_UT_UT_TYPE)
++	put.ut_type = DEAD_PROCESS;
++#endif
++#if defined(HAVE_UT_UT_ID)
++	strncpy (put.ut_id, ut->ut_id, sizeof (put.ut_id));
++#endif
++
++	strncpy (put.ut_line, ut->ut_line, sizeof (put.ut_line));
++
++#if defined(HAVE_UT_UT_TV)
++	gettimeofday(&tv, NULL);
++	put.ut_tv.tv_sec = tv.tv_sec;
++	put.ut_tv.tv_usec = tv.tv_usec;
++#elif defined(HAVE_UT_UT_TIME)
++	time (&put.ut_time);
++#endif
++
++#if defined(HAVE_UT_UT_NAME)
++	strncpy (put.ut_name, login_name, sizeof (put.ut_name));
++#elif defined(HAVE_UT_UT_USER)
++	strncpy (put.ut_user, login_name, sizeof (put.ut_user));
++#endif
++
++	if (utmp)
++		update_utmp (&put);
++
++	if (wtmp)
++		update_wtmp (WTMP_OUTPUT_FILENAME, &put);
++
++	free (ut);
++}
++
++void *
++write_login_record (char *login_name, char *display_name,
++		    char *term_name, int utmp, int wtmp, int lastlog)
++{
++	UTMP *ut;
++	char *pty = term_name;
++	struct timeval tv;
++
++	if ((ut=(UTMP *) malloc (sizeof (UTMP))) == NULL)
++		return NULL;
++
++	memset (ut, 0, sizeof (UTMP));
++
++#if defined(HAVE_UT_UT_NAME)
++	strncpy (ut->ut_name, login_name, sizeof (ut->ut_name));
++#elif defined(HAVE_UT_UT_USER)
++	strncpy (ut->ut_user, login_name, sizeof (ut->ut_user));
++#endif
++
++	/* This shouldn't happen */
++	if (strncmp (pty, "/dev/", 5) == 0)
++	    pty += 5;
++
++#if defined(HAVE_STRRCHR)
++	{
++		char *p;
++
++		if (strncmp (pty, "pts", 3) &&
++		    (p = strrchr (pty, '/')) != NULL)
++			pty = p + 1;
++	}
++#endif
++
++#if defined(HAVE_UT_UT_ID)
++	/* Just a safe-guard */
++	ut->ut_id [0] = '\0';
++
++	/* BSD-like terminal name */
++	if (strncmp (pty, "pts", 3) == 0 ||
++	    strncmp (pty, "pty", 3) == 0 ||
++	    strncmp (pty, "tty", 3) == 0) {
++		strncpy (ut->ut_id, pty+3, sizeof (ut->ut_id));
++	} else {
++		unsigned int num;
++		char buf[10];
++		/* Try to get device number and convert it to gnome-terminal # */
++		if (sscanf (pty, "%*[^0-9a-f]%x", &num) == 1) {
++			sprintf (buf, "gt%2.2x", num);
++			strncpy (ut->ut_id, buf, sizeof (ut->ut_id));
++		}
++	}
++#endif
++
++	/* For utmpx ut_line should be null terminated */
++	/* We do that for both cases to be sure */
++	strncpy (ut->ut_line, pty, sizeof (ut->ut_line));
++	ut->ut_line[sizeof (ut->ut_line)-1] = '\0';
++
++	/* We want parent's pid, not our own */
++#if defined(HAVE_UT_UT_PID)
++	ut->ut_pid  = getppid ();
++#endif
++
++#if defined(HAVE_UT_UT_TYPE)
++	ut->ut_type = USER_PROCESS;
++#endif
++	/* If structure has ut_tv it doesn't need ut_time */
++#if defined(HAVE_UT_UT_TV)
++	gettimeofday(&tv, NULL);
++	ut->ut_tv.tv_sec = tv.tv_sec;
++	ut->ut_tv.tv_usec = tv.tv_usec;
++#elif defined(HAVE_UT_UT_TIME)
++	time (&ut->ut_time);
++#endif
++	/* ut_ host supposed to be null terminated or len should */
++	/* be specifid in additional field. We do both :)  */
++#if defined(HAVE_UT_UT_HOST)
++	strncpy (ut->ut_host, display_name, sizeof (ut->ut_host));
++	ut->ut_host [sizeof (ut->ut_host)-1] = '\0';
++#    if defined(HAVE_UT_UT_SYSLEN)
++	ut->ut_syslen = strlen (ut->ut_host);
++#    endif
++#endif
++	if (utmp)
++		update_utmp (ut);
++
++	if (wtmp)
++		update_wtmp (WTMP_OUTPUT_FILENAME, ut);
++
++	if (lastlog)
++		update_lastlog(login_name, ut);
++
++	return ut;
++}
++
++void *
++update_dbs (int utmp, int wtmp, int lastlog, char *login_name, char *display_name, char *term_name)
++{
++	return write_login_record (login_name, display_name,
++				   term_name, utmp, wtmp, lastlog);
++}
+diff --git a/src/pty.cc b/src/pty.cc
+index aa03c5a5c148..4e5c897a4857 100644
+--- a/src/pty.cc
++++ b/src/pty.cc
+@@ -67,8 +67,25 @@
+ #include <gio/gio.h>
+ #include "debug.h"
+ 
++#ifdef MSG_NOSIGNAL
++#define PTY_RECVMSG_FLAGS MSG_NOSIGNAL
++#else
++#define PTY_RECVMSG_FLAGS 0
++#endif
++
+ #include <glib/gi18n-lib.h>
+ 
++#ifdef VTE_USE_GNOME_PTY_HELPER
++#include <sys/uio.h>
++#ifdef HAVE_SYS_UN_H
++#include <sys/un.h>
++#endif
++#include "../gnome-pty-helper/gnome-pty.h"
++static gboolean _vte_pty_helper_started = FALSE;
++static pid_t _vte_pty_helper_pid = -1;
++static int _vte_pty_helper_tunnel = -1;
++#endif
++
+ /* NSIG isn't in POSIX, so if it doesn't exist use this here. See bug #759196 */
+ #ifndef NSIG
+ #define NSIG (8 * sizeof(sigset_t))
+@@ -105,8 +122,11 @@ struct _VtePtyPrivate {
+ 
+         VtePtyChildSetupData child_setup_data;
+ 
++        gpointer helper_tag; /* only use when using_helper is TRUE */
++
+         guint utf8 : 1;
+         guint foreign : 1;
++        guint using_helper : 1;
+ };
+ 
+ struct _VtePtyClass {
+@@ -146,14 +166,16 @@ vte_pty_child_setup (VtePty *pty)
+         if (masterfd == -1)
+                 _exit(127);
+ 
+-        if (grantpt(masterfd) != 0) {
+-                _vte_debug_print(VTE_DEBUG_PTY, "%s failed: %m", "grantpt");
+-                _exit(127);
+-        }
++        if (!priv->using_helper) {
++                if (grantpt(masterfd) != 0) {
++                        _vte_debug_print(VTE_DEBUG_PTY, "%s failed: %m", "grantpt");
++                        _exit(127);
++                }
+ 
+-	if (unlockpt(masterfd) != 0) {
+-                _vte_debug_print(VTE_DEBUG_PTY, "%s failed: %m", "unlockpt");
+-                _exit(127);
++                if (unlockpt(masterfd) != 0) {
++                        _vte_debug_print(VTE_DEBUG_PTY, "%s failed: %m", "unlockpt");
++                        _exit(127);
++                }
+         }
+ 
+ 	char *name = ptsname(masterfd);
+@@ -695,6 +717,405 @@ _vte_pty_open_foreign(int masterfd /* consumed */)
+         return fd.steal();
+ }
+ 
++#ifdef VTE_USE_GNOME_PTY_HELPER
++#ifdef HAVE_RECVMSG
++static void
++_vte_pty_read_ptypair(int tunnel, int *parentfd, int *childfd)
++{
++	int i, ret;
++	char control[LINE_MAX], iobuf[LINE_MAX];
++	struct cmsghdr *cmsg;
++	struct msghdr msg;
++	struct iovec vec;
++
++	for (i = 0; i < 2; i++) {
++		vec.iov_base = iobuf;
++		vec.iov_len = sizeof(iobuf);
++		msg.msg_name = NULL;
++		msg.msg_namelen = 0;
++		msg.msg_iov = &vec;
++		msg.msg_iovlen = 1;
++		msg.msg_control = control;
++		msg.msg_controllen = sizeof(control);
++		ret = recvmsg(tunnel, &msg, PTY_RECVMSG_FLAGS);
++		if (ret == -1) {
++			return;
++		}
++		for (cmsg = CMSG_FIRSTHDR(&msg);
++		     cmsg != NULL;
++		     cmsg = CMSG_NXTHDR(&msg, cmsg)) {
++			if (cmsg->cmsg_type == SCM_RIGHTS) {
++				memcpy(&ret, CMSG_DATA(cmsg), sizeof(ret));
++				switch (i) {
++					case 0:
++						*parentfd = ret;
++						break;
++					case 1:
++						*childfd = ret;
++						break;
++					default:
++						g_assert_not_reached();
++						break;
++				}
++			}
++		}
++	}
++}
++#elif defined (I_RECVFD)
++static void
++_vte_pty_read_ptypair(int tunnel, int *parentfd, int *childfd)
++{
++	int i;
++	if (ioctl(tunnel, I_RECVFD, &i) == -1) {
++		return;
++	}
++	*parentfd = i;
++	if (ioctl(tunnel, I_RECVFD, &i) == -1) {
++		return;
++	}
++	*childfd = i;
++}
++#endif
++
++#ifdef HAVE_SOCKETPAIR
++static int
++_vte_pty_pipe_open(int *a, int *b)
++{
++	int p[2], ret = -1;
++#ifdef PF_UNIX
++#ifdef SOCK_STREAM
++	ret = socketpair(PF_UNIX, SOCK_STREAM, 0, p);
++#else
++#ifdef SOCK_DGRAM
++	ret = socketpair(PF_UNIX, SOCK_DGRAM, 0, p);
++#endif
++#endif
++	if (ret == 0) {
++		*a = p[0];
++		*b = p[1];
++		return 0;
++	}
++#endif
++	return ret;
++}
++#else
++static int
++_vte_pty_pipe_open(int *a, int *b)
++{
++	int p[2], ret = -1;
++
++	ret = pipe(p);
++
++	if (ret == 0) {
++		*a = p[0];
++		*b = p[1];
++	}
++	return ret;
++}
++#endif
++
++/* Like read, but hide EINTR and EAGAIN. */
++static ssize_t
++n_read(int fd, void *buffer, size_t count)
++{
++	size_t n = 0;
++	char *buf = static_cast<char *>(buffer);
++	int i;
++	while (n < count) {
++		i = read(fd, buf + n, count - n);
++		switch (i) {
++		case 0:
++			return n;
++		case -1:
++			switch (errno) {
++			case EINTR:
++			case EAGAIN:
++#ifdef ERESTART
++			case ERESTART:
++#endif
++				break;
++			default:
++				return -1;
++			}
++			break;
++		default:
++			n += i;
++			break;
++		}
++	}
++	return n;
++}
++
++/* Like write, but hide EINTR and EAGAIN. */
++static ssize_t
++n_write(int fd, const void *buffer, size_t count)
++{
++	size_t n = 0;
++	const char *buf = static_cast<const char *>(buffer);
++	int i;
++	while (n < count) {
++		i = write(fd, buf + n, count - n);
++		switch (i) {
++		case 0:
++			return n;
++		case -1:
++			switch (errno) {
++			case EINTR:
++			case EAGAIN:
++#ifdef ERESTART
++			case ERESTART:
++#endif
++				break;
++			default:
++				return -1;
++			}
++			break;
++		default:
++			n += i;
++			break;
++		}
++	}
++	return n;
++}
++
++/*
++ * _vte_pty_stop_helper:
++ *
++ * Terminates the running GNOME PTY helper.
++ */
++static void
++_vte_pty_stop_helper(void)
++{
++	if (_vte_pty_helper_started) {
++		close(_vte_pty_helper_tunnel);
++		_vte_pty_helper_tunnel = -1;
++		kill(_vte_pty_helper_pid, SIGTERM);
++		_vte_pty_helper_pid = -1;
++		_vte_pty_helper_started = FALSE;
++	}
++}
++
++/*
++ * _vte_pty_start_helper:
++ * @error: a location to store a #GError, or %NULL
++ *
++ * Starts the GNOME PTY helper process, if it is not already running.
++ *
++ * Returns: %TRUE if the helper was already started, or starting it succeeded,
++ *   %FALSE on failure with @error filled in
++ */
++static gboolean
++_vte_pty_start_helper(GError **error)
++{
++	int i, errsv;
++        int tunnel = -1;
++        int tmp[2] = { -1, -1 };
++
++        if (_vte_pty_helper_started)
++                return TRUE;
++
++	/* Create a communication link for use with the helper. */
++	tmp[0] = open("/dev/null", O_RDONLY);
++	if (tmp[0] == -1) {
++		goto failure;
++	}
++	tmp[1] = open("/dev/null", O_RDONLY);
++	if (tmp[1] == -1) {
++		goto failure;
++	}
++	if (_vte_pty_pipe_open(&_vte_pty_helper_tunnel, &tunnel) != 0) {
++		goto failure;
++	}
++	close(tmp[0]);
++	close(tmp[1]);
++        tmp[0] = tmp[1] = -1;
++
++	/* Now fork and start the helper. */
++	_vte_pty_helper_pid = fork();
++	if (_vte_pty_helper_pid == -1) {
++		goto failure;
++	}
++	if (_vte_pty_helper_pid == 0) {
++		/* Child.  Close descriptors.  No need to close all,
++		 * gnome-pty-helper does that anyway. */
++		for (i = 0; i < 3; i++) {
++			close(i);
++		}
++		/* Reassign the socket pair to stdio. */
++		dup2(tunnel, STDIN_FILENO);
++		dup2(tunnel, STDOUT_FILENO);
++		close(tunnel);
++		close(_vte_pty_helper_tunnel);
++		/* Exec our helper. */
++		execl(LIBEXECDIR "/gnome-pty-helper",
++		      "gnome-pty-helper", (char *) NULL);
++		/* Bail. */
++		_exit(1);
++	}
++	close(tunnel);
++	atexit(_vte_pty_stop_helper);
++
++        _vte_pty_helper_started = TRUE;
++	return TRUE;
++
++failure:
++        errsv = errno;
++
++        g_set_error(error, VTE_PTY_ERROR,
++                    VTE_PTY_ERROR_PTY_HELPER_FAILED,
++                    "Failed to start gnome-pty-helper: %s",
++                    g_strerror (errsv));
++
++        if (tmp[0] != -1)
++                close(tmp[0]);
++        if (tmp[1] != -1)
++                close(tmp[1]);
++        if (tunnel != -1)
++                close(tunnel);
++        if (_vte_pty_helper_tunnel != -1)
++                close(_vte_pty_helper_tunnel);
++
++        _vte_pty_helper_pid = -1;
++        _vte_pty_helper_tunnel = -1;
++
++        errno = errsv;
++        return FALSE;
++}
++
++/*
++ * _vte_pty_helper_ops_from_flags:
++ * @flags: flags from #VtePtyFlags
++ *
++ * Translates @flags into the corresponding op code for the
++ * GNOME PTY helper.
++ *
++ * Returns: the #GnomePtyOps corresponding to @flags
++ */
++static int
++_vte_pty_helper_ops_from_flags (VtePtyFlags flags)
++{
++	int op = 0;
++	static const int opmap[8] = {
++		GNOME_PTY_OPEN_NO_DB_UPDATE,		/* 0 0 0 */
++		GNOME_PTY_OPEN_PTY_LASTLOG,		/* 0 0 1 */
++		GNOME_PTY_OPEN_PTY_UTMP,		/* 0 1 0 */
++		GNOME_PTY_OPEN_PTY_LASTLOGUTMP,		/* 0 1 1 */
++		GNOME_PTY_OPEN_PTY_WTMP,		/* 1 0 0 */
++		GNOME_PTY_OPEN_PTY_LASTLOGWTMP,		/* 1 0 1 */
++		GNOME_PTY_OPEN_PTY_UWTMP,		/* 1 1 0 */
++		GNOME_PTY_OPEN_PTY_LASTLOGUWTMP,	/* 1 1 1 */
++	};
++	if ((flags & VTE_PTY_NO_LASTLOG) == 0) {
++		op += 1;
++	}
++	if ((flags & VTE_PTY_NO_UTMP) == 0) {
++		op += 2;
++	}
++	if ((flags & VTE_PTY_NO_WTMP) == 0) {
++		op += 4;
++	}
++	g_assert(op >= 0 && op < (int) G_N_ELEMENTS(opmap));
++
++        return opmap[op];
++}
++
++/*
++ * _vte_pty_open_with_helper:
++ * @pty: a #VtePty
++ * @error: a location to store a #GError, or %NULL
++ *
++ * Opens a new file descriptor to a new PTY master using the
++ * GNOME PTY helper.
++ *
++ * Returns: %TRUE on success, %FALSE on failure with @error filled in
++ */
++static gboolean
++_vte_pty_open_with_helper(VtePty *pty,
++                          GError **error)
++{
++        VtePtyPrivate *priv = pty->priv;
++	GnomePtyOps ops;
++	int ret;
++	int parentfd = -1, childfd = -1;
++	gpointer tag;
++
++	/* We have to use the pty helper here. */
++	if (!_vte_pty_start_helper(error))
++                return FALSE;
++
++	/* Try to open a new descriptor. */
++
++        ops = static_cast<GnomePtyOps>(_vte_pty_helper_ops_from_flags(priv->flags));
++        /* Send our request. */
++        if (n_write(_vte_pty_helper_tunnel,
++                    &ops, sizeof(ops)) != sizeof(ops)) {
++                g_set_error (error, VTE_PTY_ERROR,
++                              VTE_PTY_ERROR_PTY_HELPER_FAILED,
++                              "Failed to send request to gnome-pty-helper: %s",
++                              g_strerror(errno));
++                return FALSE;
++        }
++        _vte_debug_print(VTE_DEBUG_PTY, "Sent request to helper.\n");
++        /* Read back the response. */
++        if (n_read(_vte_pty_helper_tunnel,
++                    &ret, sizeof(ret)) != sizeof(ret)) {
++                g_set_error (error, VTE_PTY_ERROR,
++                              VTE_PTY_ERROR_PTY_HELPER_FAILED,
++                              "Failed to read response from gnome-pty-helper: %s",
++                              g_strerror(errno));
++                return FALSE;
++        }
++        _vte_debug_print(VTE_DEBUG_PTY,
++                        "Received response from helper.\n");
++        if (ret == 0) {
++                g_set_error_literal (error, VTE_PTY_ERROR,
++                                      VTE_PTY_ERROR_PTY_HELPER_FAILED,
++                                      "gnome-pty-helper failed to open pty");
++                return FALSE;
++        }
++        _vte_debug_print(VTE_DEBUG_PTY, "Helper returns success.\n");
++        /* Read back a tag. */
++        if (n_read(_vte_pty_helper_tunnel,
++                    &tag, sizeof(tag)) != sizeof(tag)) {
++                g_set_error (error, VTE_PTY_ERROR,
++                              VTE_PTY_ERROR_PTY_HELPER_FAILED,
++                              "Failed to read tag from gnome-pty-helper: %s",
++                              g_strerror(errno));
++                return FALSE;
++        }
++        _vte_debug_print(VTE_DEBUG_PTY, "Tag = %p.\n", tag);
++        /* Receive the master and slave ptys. */
++        _vte_pty_read_ptypair(_vte_pty_helper_tunnel,
++                              &parentfd, &childfd);
++
++        _vte_debug_print(VTE_DEBUG_PTY,
++                        "Got master pty %d and slave pty %d.\n",
++                        parentfd, childfd);
++        close(childfd);
++
++        if ((parentfd == -1) ||
++            fd_set_nonblocking(parentfd) < 0 || fd_set_cpkt(parentfd) < 0) {
++                int errsv = errno;
++
++                close(parentfd);
++
++                g_set_error (error, VTE_PTY_ERROR,
++                              VTE_PTY_ERROR_PTY_HELPER_FAILED,
++                              "Failed to read and setup master pty from gnome-pty-helper: %s",
++                              g_strerror(errsv));
++                errno = errsv;
++                return FALSE;
++        }
++
++        priv->using_helper = TRUE;
++        priv->helper_tag = tag;
++        priv->pty_fd = parentfd;
++
++        return TRUE;
++}
++
++#endif /* VTE_USE_GNOME_PTY_HELPER */
++
+ /**
+  * vte_pty_set_utf8:
+  * @pty: a #VtePty
+@@ -753,13 +1174,45 @@ vte_pty_set_utf8(VtePty *pty,
+  * vte_pty_close:
+  * @pty: a #VtePty
+  *
+- * Since 0.42 this is a no-op.
++ * Cleans up the PTY, specifically any logging performed for the
++ * session. The file descriptor to the PTY master remains open.
+  *
+  * Deprecated: 0.42
+  */
+ void
+ vte_pty_close (VtePty *pty)
+ {
++#ifdef VTE_USE_GNOME_PTY_HELPER
++        VtePtyPrivate *priv = pty->priv;
++	gpointer tag;
++	GnomePtyOps ops;
++
++        if (!priv->using_helper)
++                return;
++
++        /* Signal the helper that it needs to close its connection. */
++        tag = priv->helper_tag;
++
++        ops = GNOME_PTY_CLOSE_PTY;
++        if (n_write(_vte_pty_helper_tunnel,
++                    &ops, sizeof(ops)) != sizeof(ops)) {
++                return;
++        }
++        if (n_write(_vte_pty_helper_tunnel,
++                    &tag, sizeof(tag)) != sizeof(tag)) {
++                return;
++        }
++
++        ops = GNOME_PTY_SYNCH;
++        if (n_write(_vte_pty_helper_tunnel,
++                    &ops, sizeof(ops)) != sizeof(ops)) {
++                return;
++        }
++        n_read(_vte_pty_helper_tunnel, &ops, 1);
++
++        priv->helper_tag = NULL;
++        priv->using_helper = FALSE;
++#endif
+ }
+ 
+ /* VTE PTY class */
+@@ -788,10 +1241,47 @@ vte_pty_initable_init (GInitable *initable,
+ 
+         if (priv->foreign) {
+                 priv->pty_fd = _vte_pty_open_foreign(priv->pty_fd);
+-        } else {
+-                priv->pty_fd = _vte_pty_open_posix();
++                goto out;
+         }
+ 
++#ifdef VTE_USE_GNOME_PTY_HELPER
++	if ((priv->flags & VTE_PTY_NO_HELPER) == 0) {
++                GError *err = NULL;
++                gboolean ret = FALSE;
++
++		ret = _vte_pty_open_with_helper(pty, &err);
++                g_assert(ret || err != NULL);
++
++                if (ret)
++                        return TRUE;
++
++                _vte_debug_print(VTE_DEBUG_PTY,
++                                 "_vte_pty_open_with_helper failed: %s\n",
++                                 err->message);
++
++                /* Only do fallback if gnome-pty-helper failed! */
++                if ((priv->flags & VTE_PTY_NO_FALLBACK) ||
++                    !g_error_matches(err,
++                                     VTE_PTY_ERROR,
++                                     VTE_PTY_ERROR_PTY_HELPER_FAILED)) {
++                        g_propagate_error (error, err);
++                        return FALSE;
++                }
++
++                g_error_free(err);
++                /* Fall back to unix98 or bsd PTY */
++        }
++#else
++        if (priv->flags & VTE_PTY_NO_FALLBACK) {
++                g_set_error_literal(error, VTE_PTY_ERROR, VTE_PTY_ERROR_PTY_HELPER_FAILED,
++                                    "VTE compiled without GNOME PTY helper");
++                return FALSE;
++        }
++#endif /* VTE_USE_GNOME_PTY_HELPER */
++
++        priv->pty_fd = _vte_pty_open_posix();
++
++  out:
+         if (priv->pty_fd == -1) {
+                 vte::util::restore_errno errsv;
+                 g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errsv),
+@@ -832,6 +1322,8 @@ vte_pty_finalize (GObject *object)
+         VtePty *pty = VTE_PTY (object);
+         VtePtyPrivate *priv = pty->priv;
+ 
++        vte_pty_close(pty);
++
+         /* Close the master FD */
+         if (priv->pty_fd != -1) {
+                 close(priv->pty_fd);
+@@ -899,7 +1391,8 @@ vte_pty_class_init (VtePtyClass *klass)
+         /**
+          * VtePty:flags:
+          *
+-         * Flags.
++         * Controls how the session is recorded in lastlog, utmp, and
++         * wtmp, and whether to use the GNOME PTY helper.
+          */
+         g_object_class_install_property
+                 (object_class,
+@@ -970,6 +1463,17 @@ vte_pty_error_quark(void)
+  *
+  * Also, you MUST pass the %G_SPAWN_DO_NOT_REAP_CHILD flag.
+  *
++ * If GNOME PTY Helper is available and
++ * unless some of the %VTE_PTY_NO_LASTLOG, %VTE_PTY_NO_UTMP or
++ * %VTE_PTY_NO_WTMP flags are passed in @flags, the
++ * session is logged in the corresponding lastlog, utmp or wtmp
++ * system files.  When passing %VTE_PTY_NO_HELPER in @flags, the
++ * GNOME PTY Helper is bypassed entirely.
++ *
++ * When passing %VTE_PTY_NO_FALLBACK in @flags,
++ * and opening a PTY using the PTY helper fails, there will
++ * be no fallback to allocate a PTY using POSIX PTY functions.
++ *
+  * Returns: (transfer full): a new #VtePty, or %NULL on error with @error filled in
+  */
+ VtePty *
+diff --git a/src/vte.cc b/src/vte.cc
+index abb0abec9d23..472b9d3dbacc 100644
+--- a/src/vte.cc
++++ b/src/vte.cc
+@@ -8608,6 +8608,7 @@ VteTerminalPrivate::~VteTerminalPrivate()
+ 		g_io_channel_unref (m_pty_channel);
+ 	}
+ 	if (m_pty != NULL) {
++                vte_pty_close(m_pty);
+                 g_object_unref(m_pty);
+ 	}
+ 
+@@ -10716,6 +10717,7 @@ VteTerminalPrivate::set_pty(VtePty *new_pty)
+ 		/* Clear the outgoing buffer as well. */
+ 		_vte_byte_array_clear(m_outgoing);
+ 
++                vte_pty_close(m_pty);
+                 g_object_unref(m_pty);
+                 m_pty = NULL;
+         }
+diff --git a/src/vte/vteenums.h b/src/vte/vteenums.h
+index 54c4ee08579b..c0ec7184b415 100644
+--- a/src/vte/vteenums.h
++++ b/src/vte/vteenums.h
+@@ -99,7 +99,8 @@ typedef enum {
+ 
+ /**
+  * VtePtyError:
+- * @VTE_PTY_ERROR_PTY_HELPER_FAILED: Obsolete. Deprecated: 0.42
++ * @VTE_PTY_ERROR_PTY_HELPER_FAILED: failure when using the GNOME PTY
++ * helper to allocate the PTY. Deprecated: 0.42
+  * @VTE_PTY_ERROR_PTY98_FAILED: failure when using PTY98 to allocate the PTY
+  */
+ typedef enum {
+@@ -109,11 +110,13 @@ typedef enum {
+ 
+ /**
+  * VtePtyFlags:
+- * @VTE_PTY_NO_LASTLOG: Unused. Deprecated: 0.38
+- * @VTE_PTY_NO_UTMP: Unused. Deprecated: 0.38
+- * @VTE_PTY_NO_WTMP: Unused. Deprecated: 0.38
+- * @VTE_PTY_NO_HELPER: Unused. Deprecated: 0.38
+- * @VTE_PTY_NO_FALLBACK: Unused. Deprecated: 0.38
++ * @VTE_PTY_NO_LASTLOG: don't record the session in lastlog. Deprecated: 0.38
++ * @VTE_PTY_NO_UTMP: don't record the session in utmp. Deprecated: 0.38
++ * @VTE_PTY_NO_WTMP: don't record the session in wtmp.  Deprecated: 0.38
++ * @VTE_PTY_NO_HELPER: don't use the GNOME PTY helper to allocate the
++ * PTY. Deprecated: 0.38
++ * @VTE_PTY_NO_FALLBACK: when allocating the PTY with the PTY helper
++ * fails, don't fall back to try using POSIX. Deprecated: 0.38
+  * @VTE_PTY_DEFAULT: the default flags
+  */
+ typedef enum {
+-- 
+2.14.4
+
+
+From c3d59c71cd91a54ba5b00a685809b21ffef5a36a Mon Sep 17 00:00:00 2001
+From: Debarshi Ray <debarshir@gnome.org>
+Date: Fri, 22 Jun 2018 13:19:56 +0200
+Subject: [PATCH 2/4] widget: Make vte_terminal_spawn_async match its
+ synchronous variant
+
+It doesn't cause any visible change in behaviour on its own.
+
+However, for downstreams that continue to use gnome-pty-helper, this
+avoids a race condition where the helper closes its copy of the
+pseudo-terminal slave file descriptor right after VteTerminal has
+started polling the master for input, but before the child process has
+been forked. This causes VteTerminal to receive a G_IO_HUP and it
+stops reading the master for further input. The subsequently forked
+child process gets left in a defunct state, and this CRITICAL is
+logged:
+  Vte-CRITICAL **: void vte_terminal_watch_child(VteTerminal*, GPid):
+    assertion 'impl->m_pty != NULL' failed
+
+Polling the pseudo-terminal master device after the child process has
+been set up, avoids this race because the child keeps its copy of the
+slave file descriptor open. This prevents VteTerminal from receiving
+any G_IO_HUP even if the helper closes its copy afterwards.
+
+Fixes GNOME/vte#7:
+https://gitlab.gnome.org/GNOME/vte/issues/7
+---
+ src/vtegtk.cc | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/vtegtk.cc b/src/vtegtk.cc
+index 838d54a152ae..b07eb678e9f7 100644
+--- a/src/vtegtk.cc
++++ b/src/vtegtk.cc
+@@ -2581,10 +2581,12 @@ spawn_async_cb (GObject *source,
+ 
+         /* Automatically watch the child */
+         if (terminal != nullptr) {
+-                if (pid != -1)
++                if (pid != -1) {
++                        vte_terminal_set_pty(terminal, pty);
+                         vte_terminal_watch_child(terminal, pid);
+-                else
++                } else {
+                         vte_terminal_set_pty(terminal, nullptr);
++                }
+         } else {
+                 if (pid != -1) {
+                         vte_reaper_add_child(pid);
+@@ -2709,8 +2711,6 @@ vte_terminal_spawn_async(VteTerminal *terminal,
+                 return;
+         }
+ 
+-        vte_terminal_set_pty(terminal, pty);
+-
+         guint spawn_flags = (guint)spawn_flags_;
+ 
+         /* We do NOT support this flag. If you want to have some FD open in the child
+-- 
+2.14.4
+
+
+From feb4f8b4ea9959b0592bbbcbce36667b32f66dbb Mon Sep 17 00:00:00 2001
+From: Debarshi Ray <debarshir@gnome.org>
+Date: Fri, 22 Jun 2018 14:14:33 +0200
+Subject: [PATCH 3/4] gnome-pty-helper: Don't discard the 'const' qualifier
+
+... from pointer target type.
+---
+ gnome-pty-helper/gnome-pty-helper.c | 2 +-
+ gnome-pty-helper/gnome-pty.h        | 2 +-
+ gnome-pty-helper/gnome-utmp.c       | 4 ++--
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gnome-pty-helper/gnome-pty-helper.c b/gnome-pty-helper/gnome-pty-helper.c
+index 2666bf4cd46d..1c3cb558e70f 100644
+--- a/gnome-pty-helper/gnome-pty-helper.c
++++ b/gnome-pty-helper/gnome-pty-helper.c
+@@ -239,7 +239,7 @@ shutdown_helper (void)
+ }
+ 
+ static pty_info *
+-pty_add (int utmp, int wtmp, int lastlog, char *line, char *login_name)
++pty_add (int utmp, int wtmp, int lastlog, const char *line, char *login_name)
+ {
+ 	pty_info *pi = malloc (sizeof (pty_info));
+ 
+diff --git a/gnome-pty-helper/gnome-pty.h b/gnome-pty-helper/gnome-pty.h
+index 94f94f95e248..8aade84d46c8 100644
+--- a/gnome-pty-helper/gnome-pty.h
++++ b/gnome-pty-helper/gnome-pty.h
+@@ -16,7 +16,7 @@ typedef enum {
+ } GnomePtyOps;
+ 
+ void *update_dbs         (int utmp, int wtmp, int lastlog, char *login_name, char *display_name, char *term_name);
+-void *write_login_record (char *login_name, char *display_name, char *term_name, int utmp, int wtmp, int lastlog);
++void *write_login_record (char *login_name, char *display_name, const char *term_name, int utmp, int wtmp, int lastlog);
+ void write_logout_record (char *login_name, void *data, int utmp, int wtmp);
+ 
+ #endif
+diff --git a/gnome-pty-helper/gnome-utmp.c b/gnome-pty-helper/gnome-utmp.c
+index 1a090ec8ee38..f4584c2493bb 100644
+--- a/gnome-pty-helper/gnome-utmp.c
++++ b/gnome-pty-helper/gnome-utmp.c
+@@ -273,10 +273,10 @@ write_logout_record (char *login_name, void *data, int utmp, int wtmp)
+ 
+ void *
+ write_login_record (char *login_name, char *display_name,
+-		    char *term_name, int utmp, int wtmp, int lastlog)
++		    const char *term_name, int utmp, int wtmp, int lastlog)
+ {
+ 	UTMP *ut;
+-	char *pty = term_name;
++	const char *pty = term_name;
+ 	struct timeval tv;
+ 
+ 	if ((ut=(UTMP *) malloc (sizeof (UTMP))) == NULL)
+-- 
+2.14.4
+
+
+From 4d53ce761d75d0d830b31fd7d829de8a20c494e2 Mon Sep 17 00:00:00 2001
+From: Debarshi Ray <debarshir@gnome.org>
+Date: Fri, 22 Jun 2018 13:21:42 +0200
+Subject: [PATCH 4/4] gnome-pty-helper: Start removing code for ancient,
+ non-GNU/Linux OSes
+
+---
+ gnome-pty-helper/Makefile.am           |   3 +
+ gnome-pty-helper/configure.ac          |   4 +-
+ gnome-pty-helper/gnome-login-support.c | 296 ---------------------------------
+ gnome-pty-helper/gnome-login-support.h |  32 ----
+ gnome-pty-helper/gnome-pty-helper.c    |   1 +
+ 5 files changed, 5 insertions(+), 331 deletions(-)
+
+diff --git a/gnome-pty-helper/Makefile.am b/gnome-pty-helper/Makefile.am
+index 10a1c896e958..752f1e24b236 100644
+--- a/gnome-pty-helper/Makefile.am
++++ b/gnome-pty-helper/Makefile.am
+@@ -1,5 +1,8 @@
+ libexec_PROGRAMS = gnome-pty-helper
+ 
++gnome_pty_helper_LDADD = \
++	-lutil
++
+ gnome_pty_helper_SOURCES = \
+ 	gnome-pty.h \
+ 	gnome-login-support.c \
+diff --git a/gnome-pty-helper/configure.ac b/gnome-pty-helper/configure.ac
+index c9f0aa460029..e8ee9dcca6cf 100644
+--- a/gnome-pty-helper/configure.ac
++++ b/gnome-pty-helper/configure.ac
+@@ -15,10 +15,8 @@ AM_MAINTAINER_MODE([enable])
+ 
+ AC_CHECK_HEADERS(sys/syslimits.h sys/time.h sys/types.h sys/un.h alloca.h lastlog.h libutil.h paths.h pty.h stropts.h termios.h ttyent.h util.h utmp.h utmpx.h pty.h util.h libutil.h ttyent.h)
+ have_openpty=0
+-AC_CHECK_LIB(c,grantpt,true,[AC_CHECK_LIB(pt,grantpt)])
+-AC_CHECK_LIB(c,openpty,true,[AC_CHECK_LIB(util,openpty)])
+ AC_CHECK_LIB(c,sendmsg,true,[AC_CHECK_LIB(socket,sendmsg,LIBS="$LIBS -lsocket -lnsl",,-lnsl)])
+-AC_CHECK_FUNCS(endutent fcntl forkpty getttyent getutent getutmpx grantpt flock login_tty openpty revoke sendmsg seteuid setreuid setutent strrchr updwtmp updwtmpx utmpname utmpxname)
++AC_CHECK_FUNCS(endutent fcntl getttyent getutent getutmpx flock sendmsg seteuid setreuid setutent strrchr updwtmp updwtmpx utmpxname)
+ GPH_CHECK_UTMP
+ 
+ AC_CHECK_HEADERS(stropts.h)
+diff --git a/gnome-pty-helper/gnome-login-support.c b/gnome-pty-helper/gnome-login-support.c
+index c1a3ac67f1f5..531a99959907 100644
+--- a/gnome-pty-helper/gnome-login-support.c
++++ b/gnome-pty-helper/gnome-login-support.c
+@@ -1,6 +1,5 @@
+ /*
+  * gnome-login-support.c:
+- *    Replacement for systems that lack login_tty, open_pty and forkpty
+  *
+  * Author:
+  *    Miguel de Icaza (miguel@gnu.org)
+@@ -8,305 +7,10 @@
+  *
+  */
+ #include <config.h>
+-#include <termios.h>
+ #include <unistd.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <fcntl.h>
+-#include <string.h>
+-#include <sys/ioctl.h>
+-#include <termios.h>
+-#include <stdlib.h>
+-#include <sys/stat.h>
+ #include <errno.h>
+-#include <grp.h>
+-#include <sys/types.h>
+ #include "gnome-login-support.h"
+ 
+-/*
+- * HAVE_OPENPTY => HAVE_FORKPTY
+- */
+-
+-#ifndef HAVE_LOGIN_TTY
+-int
+-login_tty (int fd)
+-{
+-	pid_t pid = getpid ();
+-
+-	/* Create the session */
+-	setsid ();
+-
+-#ifdef TIOCSCTTY
+-	if (ioctl (fd, TIOCSCTTY, 0) == -1)
+-		return -1;
+-#else /* !TIOCSTTY */
+-        /* Hackery to set controlling tty on SVR4 -
+-           on SVR4 the first terminal we open after sesid()
+-           becomes our controlling terminal, thus we must
+-           find the name of, open, and re-close the tty
+-           since we already have it open at this point. */
+-        {
+-                char *ctty;
+-                int ct_fdes;
+-
+-                ctty = ttyname(fd);
+-                ct_fdes = open(ctty, O_RDWR);
+-                close(ct_fdes);
+-        }
+-#endif /* !TIOCSTTY */
+-
+-#if defined (_POSIX_VERSION) || defined (__svr4__)
+-	tcsetpgrp (0, pid);
+-#elif defined (TIOCSPGRP)
+-	ioctl (0, TIOCSPGRP, &pid);
+-#endif
+-
+-	dup2 (fd, 0);
+-	dup2 (fd, 1);
+-	dup2 (fd, 2);
+-	if (fd > 2)
+-		close (fd);
+-
+-	return 0;
+-}
+-#endif
+-
+-#ifndef HAVE_OPENPTY
+-static int
+-pty_open_master_bsd (char *pty_name, int *used_bsd)
+-{
+-	int pty_master;
+-	char *ptr1, *ptr2;
+-
+-	*used_bsd = 1;
+-
+-	strcpy (pty_name, "/dev/ptyXX");
+-	for (ptr1 = "pqrstuvwxyzPQRST"; *ptr1; ++ptr1)
+-	{
+-		pty_name [8] = *ptr1;
+-		for (ptr2 = "0123456789abcdef"; *ptr2; ++ptr2)
+-		{
+-			pty_name [9] = *ptr2;
+-
+-			/* Try to open master */
+-			if ((pty_master = open (pty_name, O_RDWR)) == -1) {
+-				if (errno == ENOENT)  /* Different from EIO */
+-					return -1;    /* Out of pty devices */
+-				else
+-					continue;      /* Try next pty device */
+-			}
+-			pty_name [5] = 't';	       /* Change "pty" to "tty" */
+-			if (access (pty_name, (R_OK | W_OK))){
+-				close (pty_master);
+-				pty_name [5] = 'p';
+-				continue;
+-			}
+-			return pty_master;
+-		}
+-	}
+-	return -1;  /* Ran out of pty devices */
+-}
+-
+-static int
+-pty_open_slave_bsd (const char *pty_name)
+-{
+-	int pty_slave;
+-	struct group *group_info = getgrnam ("tty");
+-
+-	if (group_info != NULL)
+-	{
+-		/* The following two calls will only succeed if we are root */
+-
+-		chown (pty_name, getuid (), group_info->gr_gid);
+-		chmod (pty_name, S_IRUSR | S_IWUSR | S_IWGRP);
+-	}
+-	else
+-	{
+-		chown (pty_name, getuid (), -1);
+-		chmod (pty_name, S_IRUSR | S_IWUSR | S_IWGRP);
+-	}
+-
+-#ifdef HAVE_REVOKE
+-	revoke (pty_name);
+-#endif
+-
+-	if ((pty_slave = open (pty_name, O_RDWR)) == -1){
+-		return -1;
+-	}
+-
+-	return pty_slave;
+-}
+-
+-/* SystemVish pty opening */
+-#if defined (HAVE_GRANTPT)
+-
+-#ifdef HAVE_STROPTS_H
+-#    include <stropts.h>
+-#endif
+-
+-static int
+-pty_open_slave (const char *pty_name)
+-{
+-	int pty_slave = open (pty_name, O_RDWR);
+-
+-	if (pty_slave == -1)
+-		return -1;
+-
+-#ifdef HAVE_STROPTS_H
+-#if !defined(__osf__)
+-	if (!ioctl (pty_slave, I_FIND, "ptem"))
+-		if (ioctl (pty_slave, I_PUSH, "ptem") == -1){
+-			close (pty_slave);
+-			return -1;
+-		}
+-
+-    if (!ioctl (pty_slave, I_FIND, "ldterm"))
+-	    if (ioctl (pty_slave, I_PUSH, "ldterm") == -1){
+-		    close (pty_slave);
+-		    return -1;
+-	    }
+-
+-#if !defined(sgi) && !defined(__sgi)
+-    if (!ioctl (pty_slave, I_FIND, "ttcompat"))
+-	    if (ioctl (pty_slave, I_PUSH, "ttcompat") == -1)
+-	    {
+-		    perror ("ioctl (pty_slave, I_PUSH, \"ttcompat\")");
+-		    close (pty_slave);
+-		    return -1;
+-	    }
+-#endif /* sgi || __sgi */
+-#endif /* __osf__ */
+-#endif /* HAVE_STROPTS_H */
+-
+-    return pty_slave;
+-}
+-
+-static int
+-pty_open_master (char *pty_name, int *used_bsd)
+-{
+-	int pty_master;
+-	char *slave_name;
+-
+-	strcpy (pty_name, "/dev/ptmx");
+-
+-	pty_master = open (pty_name, O_RDWR);
+-
+-	if ((pty_master == -1) && (errno == ENOENT)) {
+-		strcpy (pty_name, "/dev/ptc"); /* AIX */
+-		pty_master = open (pty_name, O_RDWR);
+-	}
+-
+-	/*
+-	 * Try BSD open, this is needed for Linux which
+-	 * might have Unix98 devices but no kernel support
+-	 * for those.
+-	 */
+-	if (pty_master == -1) {
+-		*used_bsd = 1;
+-		return pty_open_master_bsd (pty_name, used_bsd);
+-	}
+-	*used_bsd = 0;
+-
+-	if (grantpt (pty_master) == -1 || unlockpt (pty_master) == -1) {
+-		close (pty_master);
+-		return -1;
+-	}
+-	if ((slave_name = ptsname (pty_master)) == NULL){
+-		close (pty_master);
+-		return -1;
+-	}
+-	strcpy (pty_name, slave_name);
+-	return pty_master;
+-}
+-#else
+-#    define pty_open_master pty_open_master_bsd
+-#    define pty_open_slave  pty_open_slave_bsd
+-#endif
+-
+-int
+-openpty (int *master_fd, int *slave_fd, char *name,
+-	 struct termios *termp, struct winsize *winp)
+-{
+-	int pty_master, pty_slave, used_bsd = 0;
+-	struct group *group_info;
+-	char line [256];
+-
+-	pty_master = pty_open_master (line, &used_bsd);
+-	fcntl (pty_master, F_SETFD, FD_CLOEXEC);
+-
+-	if (pty_master == -1)
+-		return -1;
+-
+-	group_info = getgrnam ("tty");
+-
+-	if (group_info != NULL){
+-		chown (line, getuid (), group_info->gr_gid);
+-		chmod (line, S_IRUSR | S_IWUSR | S_IWGRP);
+-	} else {
+-		chown (line, getuid (), -1);
+-		chmod (line, S_IRUSR | S_IWUSR | S_IWGRP);
+-	}
+-
+-#ifdef HAVE_REVOKE
+-	revoke (line);
+-#endif
+-
+-	/* Open slave side */
+-	if (used_bsd)
+-		pty_slave = pty_open_slave_bsd (line);
+-	else
+-		pty_slave = pty_open_slave (line);
+-
+-	if (pty_slave == -1){
+-		close (pty_master);
+-
+-		errno = ENOENT;
+-		return -1;
+-	}
+-	fcntl (pty_slave, F_SETFD, FD_CLOEXEC);
+-
+-	*master_fd = pty_master;
+-	*slave_fd  = pty_slave;
+-
+-	if (termp)
+-		tcsetattr (pty_slave, TCSAFLUSH, termp);
+-
+-	if (winp)
+-		ioctl (pty_slave, TIOCSWINSZ, winp);
+-
+-	if (name)
+-		strcpy (name, line);
+-
+-	return 0;
+-}
+-
+-pid_t
+-forkpty (int *master_fd, char *name, struct termios *termp, struct winsize *winp)
+-{
+-	int master, slave;
+-	pid_t pid;
+-
+-	if (openpty (&master, &slave, name, termp, winp) == -1)
+-		return -1;
+-
+-	pid = fork ();
+-
+-	if (pid == -1)
+-		return -1;
+-
+-	/* Child */
+-	if (pid == 0){
+-		close (master);
+-		login_tty (slave);
+-	} else {
+-		*master_fd = master;
+-		close (slave);
+-	}
+-
+-	return pid;
+-}
+-#endif /* HAVE_OPENPTY */
+-
+ int
+ n_read (int fd, void *buf, int count)
+ {
+diff --git a/gnome-pty-helper/gnome-login-support.h b/gnome-pty-helper/gnome-login-support.h
+index cc80a46ff3b1..4ed4593f8848 100644
+--- a/gnome-pty-helper/gnome-login-support.h
++++ b/gnome-pty-helper/gnome-login-support.h
+@@ -1,38 +1,6 @@
+ #ifndef _GNOME_LOGIN_SUPPORT_H
+ #define _GNOME_LOGIN_SUPPORT_H
+ 
+-#ifdef HAVE_OPENPTY
+-#if defined(HAVE_PTY_H)
+-#    include <pty.h>
+-#elif defined(HAVE_UTIL_H) /* OpenBSD */
+-#    include <util.h>
+-#elif defined(HAVE_LIBUTIL_H) /* FreeBSD */
+-#    include <libutil.h>
+-#elif defined(HAVE_LIBUTIL) /* BSDI has libutil, but no libutil.h */
+-/* Avoid pulling in all the include files for no need */
+-struct termios;
+-struct winsize;
+-struct utmp;
+-	    
+-void login (struct utmp *ut);
+-int  login_tty (int fd);
+-int  logout (char *line);
+-void logwtmp (const char *line, const char *name, const char *host);
+-int  openpty (int *amaster, int *aslave, char *name, struct termios *termp, struct winsize *winp);
+-int  forkpty (int *amaster, char *name, struct termios *termp, struct winsize *winp);
+-#endif
+-#else
+-int openpty (int *master_fd, int *slavefd, char *name, struct termios *termp, struct winsize *winp);
+-pid_t forkpty (int *master_fd, char *name, struct termios *termp, struct winsize *winp);
+-#endif
+-
+-#ifndef HAVE_LOGIN_TTY
+-int login_tty (int fd);
+-#elif defined(HAVE_UTMP_H)
+-/* Get the prototype from utmp.h */
+-#include <utmp.h>
+-#endif
+-
+ int n_read (int fd, void *buffer, int size);
+ int n_write (int fd, const void *buffer, int size);
+ 
+diff --git a/gnome-pty-helper/gnome-pty-helper.c b/gnome-pty-helper/gnome-pty-helper.c
+index 1c3cb558e70f..5a8d9f7f95fd 100644
+--- a/gnome-pty-helper/gnome-pty-helper.c
++++ b/gnome-pty-helper/gnome-pty-helper.c
+@@ -51,6 +51,7 @@ extern char *strdup(const char *);
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdio.h>
++#include <pty.h>
+ #include <utmp.h>
+ #include <grp.h>
+ #include "gnome-pty.h"
+-- 
+2.14.4
+
