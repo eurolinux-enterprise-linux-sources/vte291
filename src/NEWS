@@ -1,23 +1,8 @@
-0.38.4
-======
-* Bug fixes
+0.45.90
+=======
 
-0.38.3
-======
-* Bug fixes
-
-0.38.2
-======
-* Bug fixes
-
-0.38.1
-======
-* Bug fixes
-
-0.38.0
-======
-* New API
-* Bug fixes
+* VTE now depends on PCRE2, and GRegex (which uses PCRE1 internally)
+use is deprecated.
 
 0.37.0
 ======

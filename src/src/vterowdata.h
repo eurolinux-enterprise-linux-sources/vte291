@@ -23,19 +23,12 @@
 
 #include "vteunistr.h"
 #include "vtemacros.h"
+#include "vtedefines.hh"
 
 G_BEGIN_DECLS
 
 #define VTE_TAB_WIDTH_BITS		4  /* Has to be able to store the value of 8. */
 #define VTE_TAB_WIDTH_MAX		((1 << VTE_TAB_WIDTH_BITS) - 1)
-
-#define VTE_DEFAULT_FG			256
-#define VTE_DEFAULT_BG			257
-#define VTE_BOLD_FG			258
-#define VTE_HIGHLIGHT_FG		259
-#define VTE_HIGHLIGHT_BG		260
-#define VTE_CURSOR_BG			261
-#define VTE_PALETTE_SIZE		262
 
 /*
  * VteCellAttr: A single cell style attributes
@@ -56,7 +49,7 @@ typedef struct _VteCellAttr {
 	guint64 italic: 1;
 	guint64 fore: 25;	/* Index into color palette, or direct RGB, */
 	/* 4-byte boundary */
-	guint64 back: 25;	/* see vte-private.h */
+	guint64 back: 25;	/* see vtedefines.hh */
 
 	guint64 underline: 1;
 	guint64 strikethrough: 1;

@@ -31,7 +31,9 @@
 #include "debug.h"
 
 #undef VTE_DISABLE_DEPRECATED
-#include "vte.h"
+#include <vte/vte.h>
+
+#include "vtepcre2.h"
 
 #include <glib/gi18n.h>
 
@@ -43,6 +45,8 @@ static const char *builtin_dingus[] = {
   DINGUS2,
   NULL
 };
+
+static gboolean use_gregex = FALSE;
 
 static void
 window_title_changed(GtkWidget *widget, gpointer win)
@@ -141,7 +145,8 @@ button_pressed(GtkWidget *widget, GdkEventButton *event, gpointer data)
 	char *match;
 	int tag;
 	GtkBorder padding;
-	int char_width, char_height;
+        gboolean has_extra_match;
+        char *extra_match = NULL;
 
 	switch (event->button) {
 	case 3:
@@ -150,12 +155,9 @@ button_pressed(GtkWidget *widget, GdkEventButton *event, gpointer data)
                 gtk_style_context_get_padding(gtk_widget_get_style_context(widget),
                                               gtk_widget_get_state_flags(widget),
                                               &padding);
-                char_width = vte_terminal_get_char_width (terminal);
-		char_height = vte_terminal_get_char_height (terminal);
-		match = vte_terminal_match_check(terminal,
-						 (event->x - padding.left) / char_width,
-						 (event->y - padding.top) / char_height,
-						 &tag);
+		match = vte_terminal_match_check_event(terminal,
+                                                       (GdkEvent*)event,
+                                                       &tag);
 		if (match != NULL) {
 			g_print("Matched `%s' (%d).\n", match, tag);
 			g_free(match);
@@ -163,6 +165,29 @@ button_pressed(GtkWidget *widget, GdkEventButton *event, gpointer data)
 				vte_terminal_match_remove(terminal, tag);
 			}
 		}
+                if (!use_gregex) {
+                        VteRegex *regex = vte_regex_new_for_match("\\d+", -1, PCRE2_UTF | PCRE2_NO_UTF_CHECK | PCRE2_MULTILINE, NULL);
+                        has_extra_match = vte_terminal_event_check_regex_simple(terminal,
+                                                                                (GdkEvent*)event,
+                                                                                &regex, 1,
+                                                                                0,
+                                                                                &extra_match);
+                        vte_regex_unref(regex);
+                } else {
+                        GRegex *regex = g_regex_new("\\d+", 0, 0, NULL);
+                        has_extra_match = vte_terminal_event_check_gregex_simple(terminal,
+                                                                                 (GdkEvent*)event,
+                                                                                 &regex, 1,
+                                                                                 0,
+                                                                                 &extra_match);
+                        g_regex_unref(regex);
+                }
+
+                if (has_extra_match)
+                        g_print("Extra regex match: %s\n", extra_match);
+                else
+                        g_print("Extra regex didn't match\n");
+                g_free(extra_match);
 		break;
 	case 1:
 	case 2:
@@ -528,21 +553,37 @@ add_dingus (VteTerminal *terminal,
             char **dingus)
 {
         const GdkCursorType cursors[] = { GDK_GUMBY, GDK_HAND1 };
-        GRegex *regex;
-        GError *error;
         int id, i;
 
         for (i = 0; dingus[i]; ++i) {
-                error = NULL;
-                if (!(regex = g_regex_new(dingus[i], G_REGEX_OPTIMIZE, 0, &error))) {
+                GRegex *gregex = NULL;
+                GError *error = NULL;
+                VteRegex *regex = NULL;
+
+                if (!use_gregex)
+                        regex = vte_regex_new_for_match(dingus[i], -1,
+                                                        PCRE2_UTF | PCRE2_NO_UTF_CHECK | PCRE2_MULTILINE,
+                                                        &error);
+                else
+                        gregex = g_regex_new(dingus[i], G_REGEX_OPTIMIZE | G_REGEX_MULTILINE, 0, &error);
+
+                if (error) {
                         g_warning("Failed to compile regex '%s': %s\n",
                                   dingus[i], error->message);
                         g_error_free(error);
                         continue;
                 }
 
-                id = vte_terminal_match_add_gregex(terminal, regex, 0);
-                g_regex_unref (regex);
+                if (!use_gregex)
+                        id = vte_terminal_match_add_regex(terminal, regex, 0);
+                else
+                        id = vte_terminal_match_add_gregex(terminal, gregex, 0);
+
+                if (regex)
+                        vte_regex_unref(regex);
+                if (gregex)
+                        g_regex_unref (gregex);
+
                 vte_terminal_match_set_cursor_type(terminal, id,
                                                    cursors[i % G_N_ELEMENTS(cursors)]);
         }
@@ -560,7 +601,8 @@ main(int argc, char **argv)
 		(char *) "FOO=BAR", (char *) "BOO=BIZ",
 #endif
 		NULL};
-        char *transparent = NULL;
+        int transparency_percent = 0;
+        gboolean no_argb_visual = FALSE;
         char *encoding = NULL;
         char *cjk_ambiguous_width = NULL;
 	gboolean audible = FALSE,
@@ -568,8 +610,8 @@ main(int argc, char **argv)
 		 console = FALSE, keep = FALSE,
                 icon_title = FALSE, shell = TRUE,
 		 reverse = FALSE, use_geometry_hints = TRUE,
-		 use_scrolled_window = FALSE,
-		 show_object_notifications = FALSE, rewrap = TRUE;
+                use_scrolled_window = FALSE,
+                show_object_notifications = FALSE, rewrap = TRUE;
 	char *geometry = NULL;
 	gint lines = -1;
 	const char *message = "Launching interactive shell...\r\n";
@@ -582,7 +624,8 @@ main(int argc, char **argv)
 	char *cursor_shape_string = NULL;
 	char *scrollbar_policy_string = NULL;
         char *border_width_string = NULL;
-        char *cursor_color_string = NULL;
+        char *cursor_foreground_color_string = NULL;
+        char *cursor_background_color_string = NULL;
         char *highlight_foreground_color_string = NULL;
         char *highlight_background_color_string = NULL;
         char **dingus = NULL;
@@ -604,6 +647,11 @@ main(int argc, char **argv)
 			"Add regex highlight", NULL
 		},
 		{
+			"gregex", 0, 0,
+			G_OPTION_ARG_NONE, &use_gregex,
+			"Use GRegex instead of PCRE2", NULL
+		},
+		{
 			"no-rewrap", 'R', G_OPTION_FLAG_REVERSE,
 			G_OPTION_ARG_NONE, &rewrap,
 			"Disable rewrapping on resize", NULL
@@ -615,8 +663,8 @@ main(int argc, char **argv)
 		},
 		{
 			"transparent", 'T', 0,
-			G_OPTION_ARG_STRING, &transparent,
-			"Enable the use of a transparent background", "ALPHA"
+			G_OPTION_ARG_INT, &transparency_percent,
+                        "Enable the use of a transparent background", "0..100",
 		},
 		{
 			"double-buffer", '2', G_OPTION_FLAG_REVERSE,
@@ -680,9 +728,14 @@ main(int argc, char **argv)
 			"Cursor blink mode (system|on|off)", "MODE"
 		},
 		{
-			"cursor-color", 0, 0,
-			G_OPTION_ARG_STRING, &cursor_color_string,
-			"Enable a colored cursor", NULL
+			"cursor-background-color", 0, 0,
+			G_OPTION_ARG_STRING, &cursor_background_color_string,
+			"Enable a colored cursor background", NULL
+		},
+		{
+			"cursor-foreground-color", 0, 0,
+			G_OPTION_ARG_STRING, &cursor_foreground_color_string,
+			"Enable a colored cursor foreground", NULL
 		},
 		{
 			"cursor-shape", 0, 0,
@@ -711,6 +764,12 @@ main(int argc, char **argv)
 			"Reverse foreground/background colors", NULL
 		},
 		{
+			"no-argb-visual", 0, 0,
+			G_OPTION_ARG_NONE, &no_argb_visual,
+                        "Don't use an ARGB visual",
+			NULL
+		},
+		{
 			"no-geometry-hints", 'G', G_OPTION_FLAG_REVERSE,
 			G_OPTION_ARG_NONE, &use_geometry_hints,
 			"Allow the terminal to be resized to any dimension, not constrained to fit to an integer multiple of characters",
@@ -725,7 +784,7 @@ main(int argc, char **argv)
 		{
 			"scrollbar-policy", 'P', 0,
 			G_OPTION_ARG_STRING, &scrollbar_policy_string,
-			"Set the policy for the vertical scroolbar in the scrolled window (always|auto|never; default:always)",
+			"Set the policy for the vertical scrollbar in the scrolled window (always|auto|never; default:always)",
 			NULL
 		},
 		{
@@ -760,15 +819,13 @@ main(int argc, char **argv)
 
         _vte_debug_init();
 
-	/* Have to do this early. */
-	if (getenv("VTE_PROFILE_MEMORY")) {
-		if (atol(getenv("VTE_PROFILE_MEMORY")) != 0) {
-			g_mem_set_vtable(glib_mem_profiler_table);
-		}
-	}
         if (g_getenv("VTE_CJK_WIDTH")) {
                 g_printerr("VTE_CJK_WIDTH is not supported anymore, use --cjk-width instead\n");
         }
+
+        /* Not interested in silly debug spew, bug #749195 */
+        if (g_getenv ("G_ENABLE_DIAGNOSTIC") == NULL)
+                g_setenv ("G_ENABLE_DIAGNOSTIC", "0", TRUE);
 
 	context = g_option_context_new (" - test VTE terminal emulation");
 	g_option_context_add_main_entries (context, options, NULL);
@@ -809,11 +866,16 @@ main(int argc, char **argv)
 
 	gdk_window_set_debug_updates(debug);
 
+        g_object_set(gtk_settings_get_default(),
+                     "gtk-enable-mnemonics", FALSE,
+                     "gtk-enable-accels",FALSE,
+                     /* Make gtk+ CSD not steal F10 from the terminal */
+                     "gtk-menu-bar-accel", NULL,
+                     NULL);
+
 	/* Create a window to hold the scrolling shell, and hook its
 	 * delete event to the quit function.. */
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_container_set_resize_mode(GTK_CONTAINER(window),
-				      GTK_RESIZE_IMMEDIATE);
         if (border_width_string) {
                 guint w;
 
@@ -823,10 +885,17 @@ main(int argc, char **argv)
         }
 
 	/* Set ARGB visual */
-	screen = gtk_widget_get_screen (window);
-	visual = gdk_screen_get_rgba_visual(screen);
-	if (visual)
-		gtk_widget_set_visual(GTK_WIDGET(window), visual);
+        if (transparency_percent != 0) {
+                if (!no_argb_visual) {
+                        screen = gtk_widget_get_screen (window);
+                        visual = gdk_screen_get_rgba_visual(screen);
+                        if (visual)
+                                gtk_widget_set_visual(GTK_WIDGET(window), visual);
+                }
+
+                /* Without this transparency doesn't work; see bug #729884. */
+                gtk_widget_set_app_paintable(GTK_WIDGET(window), TRUE);
+        }
 
 	if (use_scrolled_window) {
 		scrolled_window = gtk_scrolled_window_new (NULL, NULL);
@@ -916,18 +985,23 @@ main(int argc, char **argv)
 	vte_terminal_set_scrollback_lines(terminal, lines);
 	vte_terminal_set_mouse_autohide(terminal, TRUE);
 
-	if (transparent != NULL) {
-                back.alpha = g_ascii_strtod (transparent, NULL);
-                g_free (transparent);
+	if (transparency_percent != 0) {
+                back.alpha = (double)(100 - CLAMP(transparency_percent, 0, 100)) / 100.;
         }
 
 	vte_terminal_set_colors(terminal, &fore, &back, NULL, 0);
 
-	if (cursor_color_string) {
+	if (cursor_foreground_color_string) {
                 GdkRGBA rgba;
-                if (parse_color (cursor_color_string, &rgba))
+                if (parse_color (cursor_foreground_color_string, &rgba))
+                        vte_terminal_set_color_cursor_foreground(terminal, &rgba);
+                g_free(cursor_foreground_color_string);
+	}
+	if (cursor_background_color_string) {
+                GdkRGBA rgba;
+                if (parse_color (cursor_background_color_string, &rgba))
                         vte_terminal_set_color_cursor(terminal, &rgba);
-                g_free(cursor_color_string);
+                g_free(cursor_background_color_string);
 	}
 	if (highlight_foreground_color_string) {
                 GdkRGBA rgba;

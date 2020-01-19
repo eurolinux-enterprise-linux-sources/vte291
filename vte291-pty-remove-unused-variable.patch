@@ -1,0 +1,28 @@
+From 23cd7c699bb011c55ce12994b60673d676a71829 Mon Sep 17 00:00:00 2001
+From: Debarshi Ray <debarshir@gnome.org>
+Date: Tue, 23 May 2017 09:56:24 +0200
+Subject: [PATCH] pty: Removed unused variable
+
+Fallout from b59d76a5073d789f2f948cf928e883cb70cc8a75
+
+https://bugzilla.gnome.org/show_bug.cgi?id=782977
+(cherry picked from commit 965ac9144b5989859230cd859e675fd5dfb29eac)
+---
+ src/pty.cc | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/pty.cc b/src/pty.cc
+index a615e4168d2f..745735891516 100644
+--- a/src/pty.cc
++++ b/src/pty.cc
+@@ -101,7 +101,6 @@ struct _VtePty {
+ struct _VtePtyPrivate {
+         VtePtyFlags flags;
+         int pty_fd;
+-        char *pty_name;
+ 
+         VtePtyChildSetupData child_setup_data;
+ 
+-- 
+2.9.4
+

@@ -1,3 +1,5 @@
+NULL =
+
 # We require automake 1.10 for $(abs_builddir)
 AUTOMAKE_OPTIONS = 1.10
 
@@ -21,7 +23,10 @@ DOC_MAIN_SGML_FILE = $(DOC_MODULE)-docs.xml
 # e.g. DOC_SOURCE_DIR=../../../gtk
 DOC_SOURCE_DIR = \
 	$(top_srcdir)/src \
-	$(top_builddir)/src
+	$(top_srcdir)/src/vte \
+	$(top_builddir)/src \
+	$(top_builddir)/src/vte \
+	$(NULL)
 
 # Extra options to pass to gtkdoc-scangobj. Not normally needed.
 SCANGOBJ_OPTIONS =
@@ -32,7 +37,7 @@ SCAN_OPTIONS = --deprecated-guards="VTE_DISABLE_DEPRECATED" --ignore-decorators=
 
 # Extra options to supply to gtkdoc-mkdb.
 # e.g. MKDB_OPTIONS=--sgml-mode --output-format=xml
-MKDB_OPTIONS = --sgml-mode --output-format=xml --name-space=vte
+MKDB_OPTIONS = -source-suffixes=h,hh,c,cc --xml-mode --output-format=xml --name-space=vte
 
 # Extra options to supply to gtkdoc-mktmpl
 # e.g. MKTMPL_OPTIONS=--only-section-tmpl
@@ -55,11 +60,13 @@ FIXXREF_OPTIONS = \
 # e.g. HFILE_GLOB=$(top_srcdir)/gtk/*.h
 # e.g. CFILE_GLOB=$(top_srcdir)/gtk/*.c
 HFILE_GLOB = \
-	$(top_srcdir)/src/*.h \
-	$(top_builddir)/src/*.h
+	$(top_srcdir)/src/vte/*.h \
+	$(top_builddir)/src/vte/*.h \
+	$(NULL)
 
 CFILE_GLOB = \
-	$(top_srcdir)/src/*.c
+	$(top_srcdir)/src/*.c \
+	$(top_srcdir)/src/*.cc
 
 # Extra header to include when scanning, which are not under DOC_SOURCE_DIR
 # e.g. EXTRA_HFILES=$(top_srcdir}/contrib/extra.h
@@ -83,8 +90,7 @@ IGNORE_HFILES = \
 	trie.h \
 	vteconv.h \
 	vtedraw.h \
-	vteint.h \
-	vte-private.h \
+	vteinternal.hh \
 	vterowdata.h \
 	vteseq-list.h \
 	vtestream-base.h \
@@ -117,8 +123,10 @@ expand_content_files =
 GTKDOC_CFLAGS = \
 	-I$(top_srcdir) \
 	-I$(top_srcdir)/src \
+	-I$(top_srcdir)/src/vte \
 	-I$(top_builddir) \
 	-I$(top_builddir)/src \
+	-I$(top_builddir)/src/vte \
 	-DVTE_COMPILATION \
 	$(VTE_CFLAGS)
 

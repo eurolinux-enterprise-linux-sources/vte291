@@ -24,7 +24,7 @@
 #define vte_ring_h_included
 
 #include <gio/gio.h>
-#include "vte.h"
+#include <vte/vte.h>
 
 #include "vterowdata.h"
 #include "vtestream.h"
@@ -65,7 +65,8 @@ struct _VteRing {
 	VteRowData cached_row;
 	gulong cached_row_num;
 
-	gulong visible_rows_hint;  /* to keep at least a screenful of lines in memory, bug 646098 comment 12 */
+	gboolean has_streams;
+        gulong visible_rows;  /* to keep at least a screenful of lines in memory, bug 646098 comment 12 */
 };
 
 #define _vte_ring_contains(__ring, __position) \
@@ -78,14 +79,16 @@ struct _VteRing {
 const VteRowData *_vte_ring_index (VteRing *ring, gulong position);
 VteRowData *_vte_ring_index_writable (VteRing *ring, gulong position);
 
-void _vte_ring_init (VteRing *ring, gulong max_rows);
+void _vte_ring_init (VteRing *ring, gulong max_rows, gboolean has_streams);
 void _vte_ring_fini (VteRing *ring);
+long _vte_ring_reset (VteRing *ring);
 void _vte_ring_resize (VteRing *ring, gulong max_rows);
 void _vte_ring_shrink (VteRing *ring, gulong max_len);
 VteRowData *_vte_ring_insert (VteRing *ring, gulong position);
 VteRowData *_vte_ring_append (VteRing *ring);
 void _vte_ring_remove (VteRing *ring, gulong position);
-void _vte_ring_set_visible_rows_hint (VteRing *ring, gulong rows);
+void _vte_ring_drop_scrollback (VteRing *ring, gulong position);
+void _vte_ring_set_visible_rows (VteRing *ring, gulong rows);
 void _vte_ring_rewrap (VteRing *ring, glong columns, VteVisualPosition **markers);
 gboolean _vte_ring_write_contents (VteRing *ring,
 				   GOutputStream *stream,

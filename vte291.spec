@@ -1,31 +1,43 @@
 %global apiver 2.91
 
 Name:           vte291
-Version:        0.38.4
-Release:        2%{?dist}
+Version:        0.46.2
+Release:        1%{?dist}
 Summary:        Terminal emulator library
 
 License:        LGPLv2+
 URL:            http://www.gnome.org/
-Source0:        http://download.gnome.org/sources/vte/0.38/vte-%{version}.tar.xz
-# https://bugzilla.gnome.org/show_bug.cgi?id=688456
-Patch0:         0001-widget-Only-show-the-cursor-on-motion-if-moved.patch
-# https://bugzilla.gnome.org/show_bug.cgi?id=725342
-Patch1:         0001-widget-Don-t-hide-the-mouse-pointer.patch
-# https://bugzilla.gnome.org/show_bug.cgi?id=678042
-Patch2:         0001-emulation-Support-CSI-3J-clear-scrollback.patch
-# https://bugzilla.redhat.com/show_bug.cgi?id=1103380
-Patch3:         vte-scroll-speed.patch
 
+Source0:        http://download.gnome.org/sources/vte/0.46/vte-%{version}.tar.xz
+Source1:        %{name}-git.mk
+
+# https://bugzilla.gnome.org/show_bug.cgi?id=782977
+Patch0:         %{name}-pty-remove-unused-variable.patch
+
+# https://bugzilla.gnome.org/show_bug.cgi?id=711059
+# https://bugzilla.redhat.com/show_bug.cgi?id=1103380
+Patch100:       %{name}-command-notify-scroll-speed.patch
+
+# https://bugzilla.redhat.com/show_bug.cgi?id=1443504
+Patch101:       %{name}-restore-gnome-pty-helper.patch
+
+BuildRequires:  autoconf
+BuildRequires:  automake
+BuildRequires:  libtool
 BuildRequires:  gettext
+BuildRequires:  pkgconfig(gnutls)
 BuildRequires:  gobject-introspection-devel
+BuildRequires:  gperf
 BuildRequires:  gtk3-devel
+BuildRequires:  pkgconfig(libpcre2-8)
 BuildRequires:  intltool
-BuildRequires:  vala-tools
+BuildRequires:  vala
 
 # initscripts creates the utmp group
 Requires:       initscripts
 Requires:       vte-profile
+
+Conflicts:      gnome-terminal < 3.20.1-2
 
 %description
 VTE is a library implementing a terminal emulator widget for GTK+. VTE
@@ -56,20 +68,19 @@ emulator library.
 
 %prep
 %setup -q -n vte-%{version}
-%patch0 -p1 -b .motion
-%patch1 -p1 -b .auto-hide
-%patch2 -p1 -b .clear-csi3j
-%patch3 -p1 -b .scroll-speed
-
-sed -i 's/VTE_DEFAULT_TERM=xterm/\0-256color/' configure
+%patch0 -p1 -b .pty-remove-unused-variable
+%patch100 -p1 -b .command-notify-scroll-speed
+%patch101 -p1 -b .restore-gnome-pty-helper
 
 %build
+install -m 0644 %{SOURCE1} ./git.mk
+autoreconf --force --install
+
 CFLAGS="%optflags -fPIE -DPIE" \
 CXXFLAGS="$CFLAGS" \
 LDFLAGS="$LDFLAGS -Wl,-z,relro -Wl,-z,now -pie" \
 %configure \
         --disable-static \
-        --with-gtk=3.0 \
         --libexecdir=%{_libdir}/vte-%{apiver} \
         --disable-gtk-doc \
         --enable-gnome-pty-helper \
@@ -88,7 +99,8 @@ rm -f $RPM_BUILD_ROOT%{_libdir}/*.la
 %postun -p /sbin/ldconfig
 
 %files -f vte-%{apiver}.lang
-%doc COPYING NEWS README
+%license COPYING
+%doc NEWS README
 %{_libdir}/libvte-%{apiver}.so.0*
 %dir %{_libdir}/vte-%{apiver}
 %attr(2711,root,utmp) %{_libdir}/vte-%{apiver}/gnome-pty-helper
@@ -107,6 +119,23 @@ rm -f $RPM_BUILD_ROOT%{_libdir}/*.la
 %{_sysconfdir}/profile.d/vte.sh
 
 %changelog
+* Tue May 23 2017 Debarshi Ray <rishi@fedoraproject.org> - 0.46.2-1
+- Update to 0.46.2
+- Backport upstream patch to remove an unused variable
+Resolves: #1387056
+
+* Mon May 22 2017 Debarshi Ray <rishi@fedoraproject.org> - 0.46.1-2
+- Restore gnome-pty-helper
+- Add git.mk and other dependencies to regenerate the build scripts
+Resolves: #1443504
+
+* Fri Feb 24 2017 Debarshi Ray <rishi@fedoraproject.org> - 0.46.1-1
+- Update to 0.46.1
+- Drop upstreamed patches
+- Drop workaround for old GTK+ bug (#1238315)
+- Rebase downstream patches
+Resolves: #1387056
+
 * Fri May 13 2016 Debarshi Ray <rishi@fedoraproject.org> - 0.38.4-2
 - Add a property to configure the scroll speed
 Resolves: #1103380

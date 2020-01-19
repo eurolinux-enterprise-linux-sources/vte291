@@ -1,13 +1,14 @@
 /* run "make gperf" after modifying this file */
 
 %struct-type
-%language=ANSI-C
+%language=C++
 %includes
 %enum
 %readonly-tables
+%define class-name vteseq_n_hash
 %define slot-name seq
-%define hash-function-name vteseq_n_hash
-%define lookup-function-name vteseq_n_lookup
+%define hash-function-name hash
+%define lookup-function-name lookup
 
 %compare-lengths
 %pic
@@ -19,6 +20,7 @@ struct vteseq_n_struct {
 };
 
 %%
+"nop", VTE_SEQUENCE_HANDLER(vte_sequence_handler_nop)
 "line-feed", VTE_SEQUENCE_HANDLER(vte_sequence_handler_line_feed)
 "carriage-return", VTE_SEQUENCE_HANDLER(vte_sequence_handler_carriage_return)
 "bell", VTE_SEQUENCE_HANDLER(vte_sequence_handler_bell)
@@ -75,17 +77,18 @@ struct vteseq_n_struct {
 "erase-characters", VTE_SEQUENCE_HANDLER(vte_sequence_handler_erase_characters)
 "erase-in-display", VTE_SEQUENCE_HANDLER(vte_sequence_handler_erase_in_display)
 "set-window-title", VTE_SEQUENCE_HANDLER(vte_sequence_handler_set_window_title)
+"set-cursor-style", VTE_SEQUENCE_HANDLER(vte_sequence_handler_set_cursor_style)
 #"cursor-lower-left", VTE_SEQUENCE_HANDLER_NULL
 "delete-characters", VTE_SEQUENCE_HANDLER(vte_sequence_handler_delete_characters)
 "application-keypad", VTE_SEQUENCE_HANDLER(vte_sequence_handler_application_keypad)
 #"change-font-number", VTE_SEQUENCE_HANDLER_NULL
 "return-terminal-id", VTE_SEQUENCE_HANDLER(vte_sequence_handler_return_terminal_id)
 #"end-of-guarded-area", VTE_SEQUENCE_HANDLER_NULL
-"utf-8-character-set", VTE_SEQUENCE_HANDLER(vte_sequence_handler_utf_8_character_set)
+#"utf-8-character-set", VTE_SEQUENCE_HANDLER_NULL
 "window-manipulation", VTE_SEQUENCE_HANDLER(vte_sequence_handler_window_manipulation)
-"change-cursor-color-bel", VTE_SEQUENCE_HANDLER(vte_sequence_handler_change_cursor_color_bel)
-"change-cursor-color-st", VTE_SEQUENCE_HANDLER(vte_sequence_handler_change_cursor_color_st)
-"reset-cursor-color", VTE_SEQUENCE_HANDLER(vte_sequence_handler_reset_cursor_color)
+"change-cursor-background-color-bel", VTE_SEQUENCE_HANDLER(vte_sequence_handler_change_cursor_background_color_bel)
+"change-cursor-background-color-st", VTE_SEQUENCE_HANDLER(vte_sequence_handler_change_cursor_background_color_st)
+"reset-cursor-background-color", VTE_SEQUENCE_HANDLER(vte_sequence_handler_reset_cursor_background_color)
 "character-attributes", VTE_SEQUENCE_HANDLER(vte_sequence_handler_character_attributes)
 "device-status-report", VTE_SEQUENCE_HANDLER(vte_sequence_handler_device_status_report)
 "set-scrolling-region", VTE_SEQUENCE_HANDLER(vte_sequence_handler_set_scrolling_region)
@@ -112,13 +115,19 @@ struct vteseq_n_struct {
 "insert-blank-characters", VTE_SEQUENCE_HANDLER(vte_sequence_handler_insert_blank_characters)
 #"invoke-g2-character-set", VTE_SEQUENCE_HANDLER_NULL
 #"invoke-g3-character-set", VTE_SEQUENCE_HANDLER_NULL
-"default-character-set", VTE_SEQUENCE_HANDLER(vte_sequence_handler_default_character_set)
+#"default-character-set", VTE_SEQUENCE_HANDLER_NULL
 #"selective-erase-in-line", VTE_SEQUENCE_HANDLER_NULL
 #"ansi-conformance-level-1", VTE_SEQUENCE_HANDLER_NULL
 #"ansi-conformance-level-2", VTE_SEQUENCE_HANDLER_NULL
 #"ansi-conformance-level-3", VTE_SEQUENCE_HANDLER_NULL
-"alternate-character-set-start", VTE_SEQUENCE_HANDLER(vte_sequence_handler_alternate_character_set_start)
-"alternate-character-set-end", VTE_SEQUENCE_HANDLER(vte_sequence_handler_alternate_character_set_end)
+"designate-g0-plain", VTE_SEQUENCE_HANDLER(vte_sequence_handler_designate_g0_plain)
+"designate-g0-line-drawing", VTE_SEQUENCE_HANDLER(vte_sequence_handler_designate_g0_line_drawing)
+"designate-g0-british", VTE_SEQUENCE_HANDLER(vte_sequence_handler_designate_g0_british)
+"designate-g1-plain", VTE_SEQUENCE_HANDLER(vte_sequence_handler_designate_g1_plain)
+"designate-g1-line-drawing", VTE_SEQUENCE_HANDLER(vte_sequence_handler_designate_g1_line_drawing)
+"designate-g1-british", VTE_SEQUENCE_HANDLER(vte_sequence_handler_designate_g1_british)
+"shift-in", VTE_SEQUENCE_HANDLER(vte_sequence_handler_shift_in)
+"shift-out", VTE_SEQUENCE_HANDLER(vte_sequence_handler_shift_out)
 "change-background-color-bel", VTE_SEQUENCE_HANDLER(vte_sequence_handler_change_background_color_bel)
 "change-background-color-st", VTE_SEQUENCE_HANDLER(vte_sequence_handler_change_background_color_st)
 "reset-background-color", VTE_SEQUENCE_HANDLER(vte_sequence_handler_reset_background_color)
@@ -160,3 +169,5 @@ struct vteseq_n_struct {
 #"reset-mouse-cursor-foreground-color", VTE_SEQUENCE_HANDLER_NULL
 "set-current-directory-uri", VTE_SEQUENCE_HANDLER(vte_sequence_handler_set_current_directory_uri)
 "set-current-file-uri", VTE_SEQUENCE_HANDLER(vte_sequence_handler_set_current_file_uri)
+"urxvt-777", VTE_SEQUENCE_HANDLER(vte_sequence_handler_urxvt_777)
+"iterm2-1337", VTE_SEQUENCE_HANDLER(vte_sequence_handler_iterm2_1337)

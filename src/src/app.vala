@@ -19,12 +19,176 @@
 namespace Test
 {
 
+[GtkTemplate (ui = "/org/gnome/vte/test/app/ui/search-popover.ui")]
+class SearchPopover : Gtk.Popover
+{
+  public Vte.Terminal terminal { get; construct set; }
+
+  [GtkChild] private Gtk.SearchEntry search_entry;
+  [GtkChild] private Gtk.Button search_prev_button;
+  [GtkChild] private Gtk.Button search_next_button;
+  [GtkChild] private Gtk.Button close_button;
+  [GtkChild] private Gtk.ToggleButton  match_case_checkbutton;
+  [GtkChild] private Gtk.ToggleButton entire_word_checkbutton;
+  [GtkChild] private Gtk.ToggleButton regex_checkbutton;
+  [GtkChild] private Gtk.ToggleButton wrap_around_checkbutton;
+  [GtkChild] private Gtk.Button reveal_button;
+  [GtkChild] private Gtk.Revealer revealer;
+
+  private bool regex_caseless = false;
+  private string? regex_pattern = null;
+  private bool has_regex = false;
+
+  public SearchPopover(Vte.Terminal term,
+                       Gtk.Widget relative_to)
+  {
+    Object(relative_to: relative_to, terminal: term);
+
+    close_button.clicked.connect(() => { hide(); });
+    reveal_button.bind_property("active", revealer, "reveal-child");
+
+#if GTK_3_16
+    search_entry.next_match.connect(() => { search(false); });
+    search_entry.previous_match.connect(() => { search(true); });
+#endif
+    search_entry.search_changed.connect(() => { update_regex(); });
+
+    search_next_button.clicked.connect(() => { search(false); });
+    search_prev_button.clicked.connect(() => { search(true); });
+
+    match_case_checkbutton.toggled.connect(() => { update_regex(); });
+    entire_word_checkbutton.toggled.connect(() => { update_regex(); });
+    regex_checkbutton.toggled.connect(() => { update_regex(); });
+
+    wrap_around_checkbutton.toggled.connect(() => {
+        terminal.search_set_wrap_around(wrap_around_checkbutton.active);
+      });
+
+    update_sensitivity();
+  }
+
+  private bool have_regex()
+  {
+	return has_regex;
+  }
+
+  private void update_sensitivity()
+  {
+    bool can_search = have_regex();
+
+    search_prev_button.set_sensitive(can_search);
+    search_next_button.set_sensitive(can_search);
+  }
+
+  private void update_regex()
+  {
+    string search_text;
+    string pattern = null;
+    bool caseless = false;
+    GLib.Regex? gregex = null;
+    Vte.Regex? regex = null;
+
+    search_text = search_entry.get_text();
+    caseless = !match_case_checkbutton.active;
+
+    if (regex_checkbutton.active) {
+      pattern = search_text;
+    } else {
+      pattern = GLib.Regex.escape_string(search_text);
+    }
+
+    if (entire_word_checkbutton.active)
+      pattern = "\\b" + pattern + "\\b";
+
+    if (caseless == regex_caseless &&
+        pattern == regex_pattern)
+      return;
+
+    regex_pattern = null;
+    regex_caseless = caseless;
+
+    if (search_text.length != 0) {
+      try {
+        if (!App.Options.no_pcre) {
+          uint32 flags;
+
+          flags = 0x40080400u /* PCRE2_UTF | PCRE2_NO_UTF_CHECK | PCRE2_MULTILINE */;
+          if (caseless)
+            flags |= 0x00000008u; /* PCRE2_CASELESS */
+          regex = new Vte.Regex.for_search(pattern, pattern.length, flags);
+
+          try {
+            regex.jit(0x00000001u /* PCRE2_JIT_COMPLETE */);
+            regex.jit(0x00000002u /* PCRE2_JIT_PARTIAL_SOFT */);
+          } catch (Error e) {
+            if (e.code != -45 /* PCRE2_ERROR_JIT_BADOPTION */) /* JIT not supported */
+              printerr("JITing regex \"%s\" failed: %s\n", pattern, e.message);
+          }
+        } else {
+          GLib.RegexCompileFlags flags;
+
+          flags = GLib.RegexCompileFlags.OPTIMIZE |
+                  GLib.RegexCompileFlags.MULTILINE;
+          if (caseless)
+            flags |= GLib.RegexCompileFlags.CASELESS;
+
+          gregex = new GLib.Regex(pattern, flags, 0);
+        }
+
+        regex_pattern = pattern;
+        search_entry.set_tooltip_text(null);
+      } catch (Error e) {
+        regex = null;
+        gregex = null;
+        search_entry.set_tooltip_text(e.message);
+      }
+    } else {
+      regex = null;
+      gregex = null;
+      search_entry.set_tooltip_text(null);
+    }
+
+    if (!App.Options.no_pcre) {
+      has_regex = regex != null;
+      terminal.search_set_regex(regex, 0);
+    } else {
+      has_regex = gregex != null;
+      terminal.search_set_gregex(gregex, 0);
+    }
+
+    update_sensitivity();
+  }
+
+  private void search(bool backward)
+  {
+    if (!have_regex())
+      return;
+
+    if (backward)
+      terminal.search_find_previous();
+    else
+      terminal.search_find_next();
+  }
+
+} /* class SearchPopover */
+
+[GtkTemplate (ui = "/org/gnome/vte/test/app/ui/window.ui")]
 class Window : Gtk.ApplicationWindow
 {
+  [GtkChild] private Gtk.Scrollbar scrollbar;
+  [GtkChild] private Gtk.Box terminal_box;
+  /* [GtkChild] private Gtk.Box notifications_box; */
+  [GtkChild] private Gtk.Widget readonly_emblem;
+  /* [GtkChild] private Gtk.Button copy_button; */
+  /* [GtkChild] private Gtk.Button paste_button; */
+  [GtkChild] private Gtk.ToggleButton find_button;
+  [GtkChild] private Gtk.MenuButton gear_button;
+
   private Vte.Terminal terminal;
-  private Gtk.Scrollbar scrollbar;
   private Gtk.Clipboard clipboard;
   private GLib.Pid child_pid;
+  private SearchPopover search_popover;
+  private uint launch_idle_id;
 
   private string[] builtin_dingus = {
     "(((gopher|news|telnet|nntp|file|http|ftp|https)://)|(www|ftp)[-A-Za-z0-9]*\\.)[-A-Za-z0-9\\.]+(:[0-9]*)?",
@@ -35,14 +199,72 @@ class Window : Gtk.ApplicationWindow
     { "copy",        action_copy_cb            },
     { "copy-match",  action_copy_match_cb, "s" },
     { "paste",       action_paste_cb           },
-    { "reset",       action_reset_cb           }
+    { "reset",       action_reset_cb,      "b" },
+    { "find",        action_find_cb            },
+    { "quit",        action_quit_cb            }
   };
 
   public Window(App app)
   {
     Object(application: app);
 
+    /* Create terminal and connect scrollbar */
+    terminal = new Vte.Terminal();
+    var margin = App.Options.extra_margin;
+    if (margin > 0) {
+      terminal.margin_start =
+        terminal.margin_end =
+        terminal.margin_top =
+        terminal.margin_bottom = margin;
+    }
+
+    scrollbar.set_adjustment(terminal.get_vadjustment());
+
+    /* Create actions */
     add_action_entries (action_entries, this);
+
+    /* Property actions */
+    var action = new GLib.PropertyAction ("input-enabled", terminal, "input-enabled");
+    add_action(action);
+    action.notify["state"].connect((obj, pspec) => {
+        GLib.Action a = (GLib.Action)obj;
+        readonly_emblem.set_visible(!a.state.get_boolean());
+      });
+
+    /* Find */
+    search_popover = new SearchPopover(terminal, find_button);
+    search_popover.closed.connect(() => {
+        if (find_button.active)
+          find_button.set_active(false);
+      });
+
+    find_button.toggled.connect(() => {
+        var active = find_button.active;
+        if (search_popover.visible != active)
+          search_popover.set_visible(active);
+      });
+
+    /* Gear menu */
+    /* FIXME: figure out how to put this into the .ui file */
+    var menu = new GLib.Menu();
+
+    var section = new GLib.Menu();
+    section.append("_Copy", "win.copy");
+    section.append("_Paste", "win.paste");
+    section.append("_Find…", "win.find");
+    menu.append_section(null, section);
+
+    section = new GLib.Menu();
+    section.append("_Reset", "win.reset(false)");
+    section.append("Reset and C_lear", "win.reset(true)");
+    section.append("_Input enabled", "win.input-enabled");
+    menu.append_section(null, section);
+
+    section = new GLib.Menu();
+    section.append("_Quit", "win.quit");
+    menu.append_section(null, section);
+
+    gear_button.set_menu_model(menu);
 
     /* set_resize_mode(Gtk.ResizeMode.IMMEDIATE); */
 
@@ -64,23 +286,8 @@ class Window : Gtk.ApplicationWindow
       app_paintable = true;
     }
 
-    var ui = new Gtk.Builder.from_resource("/org/gnome/vte/test/app/ui/window.ui");
-    add(ui.get_object("main-box") as Gtk.Widget);
-
-    var box = ui.get_object("terminal-box") as Gtk.Box;
-
-    if (App.Options.no_toolbar) {
-      var toolbar = ui.get_object("toolbar") as Gtk.Widget;
-      toolbar.hide();
-    }
-
-    terminal = new Vte.Terminal();
-
-    /* Connect scrollbar */
-    scrollbar = ui.get_object("scrollbar") as Gtk.Scrollbar;
-    scrollbar.set_adjustment(terminal.get_vadjustment());
-
     /* Signals */
+    terminal.popup_menu.connect(popup_menu_cb);
     terminal.button_press_event.connect(button_press_event_cb);
     terminal.char_size_changed.connect(char_size_changed_cb);
     terminal.child_exited.connect(child_exited_cb);
@@ -104,7 +311,7 @@ class Window : Gtk.ApplicationWindow
 
     /* Settings */
     if (App.Options.no_double_buffer)
-      terminal.set_double_buffered(true);
+      terminal.set_double_buffered(false);
 
     if (App.Options.encoding != null) {
       try {
@@ -113,6 +320,9 @@ class Window : Gtk.ApplicationWindow
         printerr("Failed to set encoding: %s\n", e.message);
       }
     }
+
+    if (App.Options.word_char_exceptions != null)
+      terminal.set_word_char_exceptions(App.Options.word_char_exceptions);
 
     terminal.set_audible_bell(App.Options.audible);
     terminal.set_cjk_ambiguous_width(App.Options.get_cjk_ambiguous_width());
@@ -133,7 +343,8 @@ class Window : Gtk.ApplicationWindow
     terminal.set_colors(App.Options.get_color_fg(),
                         App.Options.get_color_bg(),
                         null);
-    terminal.set_color_cursor(App.Options.get_color_cursor());
+    terminal.set_color_cursor(App.Options.get_color_cursor_background());
+    terminal.set_color_cursor_foreground(App.Options.get_color_cursor_foreground());
     terminal.set_color_highlight(App.Options.get_color_hl_bg());
     terminal.set_color_highlight_foreground(App.Options.get_color_hl_fg());
 
@@ -143,11 +354,8 @@ class Window : Gtk.ApplicationWindow
     if (App.Options.dingus != null)
       add_dingus(App.Options.dingus);
 
-    /* Property actions */
-    add_action(new GLib.PropertyAction ("input-enabled", terminal, "input-enabled"));
-
     /* Done! */
-    box.pack_start(terminal);
+    terminal_box.pack_start(terminal);
     terminal.show();
 
     update_paste_sensitivity();
@@ -164,11 +372,32 @@ class Window : Gtk.ApplicationWindow
 
     for (int i = 0; i < dingus.length; ++i) {
       try {
-        GLib.Regex regex;
         int tag;
 
-        regex = new GLib.Regex(dingus[i], GLib.RegexCompileFlags.OPTIMIZE, 0);
-        tag = terminal.match_add_gregex(regex, 0);
+        if (!App.Options.no_pcre) {
+          Vte.Regex regex;
+
+          regex = new Vte.Regex.for_match(dingus[i], dingus[i].length,
+                                          0x40080408u /* PCRE2_UTF | PCRE2_NO_UTF_CHECK | PCRE2_CASELESS | PCRE2_MULTILINE */);
+          try {
+            regex.jit(0x00000001u /* PCRE2_JIT_COMPLETE */);
+            regex.jit(0x00000002u /* PCRE2_JIT_PARTIAL_SOFT */);
+          } catch (Error e) {
+            if (e.code != -45 /* PCRE2_ERROR_JIT_BADOPTION */) /* JIT not supported */
+              printerr("JITing regex \"%s\" failed: %s\n", dingus[i], e.message);
+          }
+
+          tag = terminal.match_add_regex(regex, 0);
+        } else {
+          GLib.Regex regex;
+
+          regex = new GLib.Regex(dingus[i],
+                                 GLib.RegexCompileFlags.OPTIMIZE |
+                                 GLib.RegexCompileFlags.MULTILINE,
+                                 0);
+          tag = terminal.match_add_gregex(regex, 0);
+        }
+
         terminal.match_set_cursor_type(tag, cursors[i % cursors.length]);
       } catch (Error e) {
         printerr("Failed to compile regex \"%s\": %s\n", dingus[i], e.message);
@@ -219,15 +448,23 @@ class Window : Gtk.ApplicationWindow
     string[] argv;
 
     Shell.parse_argv(command, out argv);
-    terminal.spawn_sync(App.Options.get_pty_flags(),
-                        App.Options.working_directory,
-                        argv,
-                        App.Options.environment,
-                        GLib.SpawnFlags.SEARCH_PATH,
-                        null, /* child setup */
-                        out child_pid,
-                        null /* cancellable */);
-    print("Fork succeeded, PID %d\n", child_pid);
+    launch_idle_id = GLib.Idle.add(() => {
+        try {
+          terminal.spawn_sync(Vte.PtyFlags.DEFAULT,
+                              App.Options.working_directory,
+                              argv,
+                              App.Options.environment,
+                              GLib.SpawnFlags.SEARCH_PATH,
+                              null, /* child setup */
+                              out child_pid,
+                              null /* cancellable */);
+          print("Fork succeeded, PID %d\n", child_pid);
+        } catch (Error e) {
+          printerr("Failed to fork: %s\n", e.message);
+        }
+        launch_idle_id = 0;
+        return false;
+      });
   }
 
   private void launch_shell() throws Error
@@ -248,7 +485,7 @@ class Window : Gtk.ApplicationWindow
     Vte.Pty pty;
     Posix.pid_t pid;
 
-    pty = new Vte.Pty.sync(App.Options.get_pty_flags(), null);
+    pty = new Vte.Pty.sync(Vte.PtyFlags.DEFAULT, null);
 
     pid = Posix.fork();
 
@@ -343,12 +580,14 @@ class Window : Gtk.ApplicationWindow
     terminal.paste_clipboard();
   }
 
-  private void action_reset_cb()
+  private void action_reset_cb(GLib.SimpleAction action, GLib.Variant? parameter)
   {
     bool clear;
     Gdk.ModifierType modifiers;
 
-    if (Gtk.get_current_event_state(out modifiers))
+    if (parameter != null) {
+      clear = parameter.get_boolean();
+    } else if (Gtk.get_current_event_state(out modifiers))
       clear = (modifiers & Gdk.ModifierType.CONTROL_MASK) != 0;
     else
       clear = false;
@@ -356,10 +595,31 @@ class Window : Gtk.ApplicationWindow
     terminal.reset(true, clear);
   }
 
+  private void action_find_cb()
+  {
+    find_button.set_active(true);
+  }
+
+  private void action_quit_cb()
+  {
+    destroy();
+  }
+
+  private bool popup_menu_cb()
+  {
+    return show_context_menu(0, Gtk.get_current_event_time(), null);
+  }
+
   private bool button_press_event_cb(Gtk.Widget widget, Gdk.EventButton event)
   {
     if (event.button != 3)
       return false;
+
+    return show_context_menu(event.button, event.time, event);
+  }
+
+  private bool show_context_menu(uint button, uint32 timestamp, Gdk.Event? event)
+  {
     if (App.Options.no_context_menu)
       return false;
 
@@ -367,18 +627,22 @@ class Window : Gtk.ApplicationWindow
     menu.append("_Copy", "win.copy");
 
 #if VALA_0_24
-    var match = terminal.match_check_event(event, null);
-    if (match != null)
-      menu.append("Copy _Match", "win.copy-match::" + match);
+    if (event != null) {
+      var match = terminal.match_check_event(event, null);
+      if (match != null)
+        menu.append("Copy _Match", "win.copy-match::" + match);
+    }
 #endif
 
     menu.append("_Paste", "win.paste");
 
     var popup = new Gtk.Menu.from_model(menu);
     popup.attach_to_widget(this, null);
-    popup.popup(null, null, null, event.button, event.time);
+    popup.popup(null, null, null, button, timestamp);
+    if (button == 0)
+      popup.select_first(true);
 
-    return false;
+    return true;
   }
 
   private void char_size_changed_cb(Vte.Terminal terminal, uint width, uint height)
@@ -512,26 +776,37 @@ class Window : Gtk.ApplicationWindow
 
 class App : Gtk.Application
 {
-  private Window window;
-
   public App()
   {
     Object(application_id: "org.gnome.Vte.Test.App",
            flags: ApplicationFlags.NON_UNIQUE);
+
+    var settings = Gtk.Settings.get_default();
+    settings.gtk_enable_mnemonics = false;
+    settings.gtk_enable_accels = false;
+    /* Make gtk+ CSD not steal F10 from the terminal */
+    settings.gtk_menu_bar_accel = null;
   }
 
   protected override void startup()
   {
     base.startup();
 
-    window = new Window(this);
-    window.launch();
+    for (uint i = 0; i < App.Options.n_windows.clamp(0, 16); i++)
+      new Window(this);
   }
 
   protected override void activate()
   {
-    window.apply_geometry();
-    window.present();
+    foreach (Gtk.Window win in this.get_windows()) {
+      if (!(win is Window))
+        continue;
+
+      var window = win as Window;
+      window.apply_geometry();
+      window.present();
+      window.launch();
+    }
   }
 
   public struct Options
@@ -540,12 +815,14 @@ class App : Gtk.Application
     public static string? command = null;
     private static string? cjk_ambiguous_width_string = null;
     private static string? cursor_blink_mode_string = null;
-    private static string? cursor_color_string = null;
+    private static string? cursor_background_color_string = null;
+    private static string? cursor_foreground_color_string = null;
     private static string? cursor_shape_string = null;
     public static string[]? dingus = null;
     public static bool debug = false;
     public static string? encoding = null;
     public static string[]? environment = null;
+    public static int extra_margin = 0;
     public static string? font_string = null;
     public static string? geometry = null;
     private static string? hl_bg_color_string = null;
@@ -557,16 +834,17 @@ class App : Gtk.Application
     public static bool no_context_menu = false;
     public static bool no_double_buffer = false;
     public static bool no_geometry_hints = false;
+    public static bool no_pcre = false;
     public static bool no_rewrap = false;
     public static bool no_shell = false;
-    public static bool no_toolbar = false;
     public static bool object_notifications = false;
     public static string? output_filename = null;
-    private static string? pty_flags_string = null;
     public static bool reverse = false;
     public static int scrollback_lines = 512;
     public static int transparency_percent = 0;
     public static bool version = false;
+    public static int n_windows = 1;
+    public static string? word_char_exceptions = null;
     public static string? working_directory = null;
 
     private static int parse_enum(Type type, string str)
@@ -582,12 +860,13 @@ class App : Gtk.Application
       return value;
     }
 
+    /*
     private static uint parse_flags(Type type, string str)
     {
       uint value = 0;
       var flags_klass = (FlagsClass)type.class_ref();
       string[]? flags = str.split(",|", -1);
-		  
+
       if (flags == null)
         return value;
 
@@ -601,6 +880,7 @@ class App : Gtk.Application
       }
       return value;
     }
+    */
 
     public static int get_cjk_ambiguous_width()
     {
@@ -650,9 +930,14 @@ class App : Gtk.Application
       return color;
     }
 
-    public static Gdk.RGBA? get_color_cursor()
+    public static Gdk.RGBA? get_color_cursor_background()
     {
-      return get_color(cursor_color_string);
+      return get_color(cursor_background_color_string);
+    }
+
+    public static Gdk.RGBA? get_color_cursor_foreground()
+    {
+      return get_color(cursor_foreground_color_string);
     }
 
     public static Gdk.RGBA? get_color_hl_bg()
@@ -687,17 +972,6 @@ class App : Gtk.Application
       return value;
     }
 
-    public static Vte.PtyFlags get_pty_flags()
-    {
-      Vte.PtyFlags flags;
-      if (pty_flags_string != null)
-        flags = (Vte.PtyFlags)parse_flags(typeof(Vte.CursorShape),
-                                          pty_flags_string);
-      else
-        flags = Vte.PtyFlags.DEFAULT;
-      return flags;
-    }
-		
     public static const OptionEntry[] entries = {
       { "audible-bell", 'a', 0, OptionArg.NONE, ref audible,
         "Use audible terminal bell", null },
@@ -707,8 +981,10 @@ class App : Gtk.Application
         "Specify the cjk ambiguous width to use for UTF-8 encoding", "NARROW|WIDE" },
       { "cursor-blink", 0, 0, OptionArg.STRING, ref cursor_blink_mode_string,
         "Cursor blink mode (system|on|off)", "MODE" },
-      { "cursor-color", 0, 0, OptionArg.STRING, ref cursor_color_string,
-        "Enable a colored cursor", null },
+      { "cursor-background-color", 0, 0, OptionArg.STRING, ref cursor_background_color_string,
+        "Enable a colored cursor background", null },
+      { "cursor-foreground-color", 0, 0, OptionArg.STRING, ref cursor_foreground_color_string,
+        "Enable a colored cursor foreground", null },
       { "cursor-shape", 0, 0, OptionArg.STRING, ref cursor_shape_string,
         "Set cursor shape (block|underline|ibeam)", null },
       { "dingu", 'D', 0, OptionArg.STRING_ARRAY, ref dingus,
@@ -719,8 +995,12 @@ class App : Gtk.Application
         "Specify the terminal encoding to use", null },
       { "env", 0, 0, OptionArg.STRING_ARRAY, ref environment,
         "Add environment variable to the child\'s environment", "VAR=VALUE" },
+      { "extra-margin", 0, 0, OptionArg.INT, ref extra_margin,
+        "Add extra margin around the terminal widget", "MARGIN" },
       { "font", 'f', 0, OptionArg.STRING, ref font_string,
         "Specify a font to use", null },
+      { "gregex", 0, 0, OptionArg.NONE, ref no_pcre,
+        "Use GRegex instead of PCRE2", null },
       { "geometry", 'g', 0, OptionArg.STRING, ref geometry,
         "Set the size (in characters) and position", "GEOMETRY" },
       { "highlight-background-color", 0, 0, OptionArg.STRING, ref hl_bg_color_string,
@@ -745,14 +1025,10 @@ class App : Gtk.Application
         "Disable rewrapping on resize", null },
       { "no-shell", 'S', 0, OptionArg.NONE, ref no_shell,
         "Disable spawning a shell inside the terminal", null },
-      { "no-toolbar", 0, 0, OptionArg.NONE, ref no_toolbar,
-        "Disable toolbar", null },
       { "object-notifications", 'N', 0, OptionArg.NONE, ref object_notifications,
         "Print VteTerminal object notifications", null },
       { "output-file", 0, 0, OptionArg.FILENAME, ref output_filename,
         "Save terminal contents to file at exit", null },
-      { "pty-flags", 0, 0, OptionArg.STRING, ref pty_flags_string,
-        "PTY flags set from default|no-utmp|no-wtmp|no-lastlog|no-helper|no-fallback", null },
       { "reverse", 0, 0, OptionArg.NONE, ref reverse,
         "Reverse foreground/background colors", null },
       { "scrollback-lines", 'n', 0, OptionArg.INT, ref scrollback_lines,
@@ -761,7 +1037,11 @@ class App : Gtk.Application
         "Enable the use of a transparent background", "0..100" },
       { "version", 0, 0, OptionArg.NONE, ref version,
         "Show version", null },
-      { "working-directory", 'w', 0,OptionArg.FILENAME, ref working_directory,
+      { "windows", 0, 0, OptionArg.INT, ref n_windows,
+        "Open multiple windows (default: 1)", "NUMBER" },
+      { "word-char-exceptions", 0, 0, OptionArg.STRING, ref word_char_exceptions,
+        "Specify the word char exceptions", "CHARS" },
+      { "working-directory", 'w', 0, OptionArg.FILENAME, ref working_directory,
         "Specify the initial working directory of the terminal", null },
       { null }
     };
@@ -769,8 +1049,14 @@ class App : Gtk.Application
 
   public static int main(string[] argv)
   {
+    Intl.setlocale (LocaleCategory.ALL, "");
+
     if (Environment.get_variable("VTE_CJK_WIDTH") != null) {
       printerr("VTE_CJK_WIDTH is not supported anymore, use --cjk-width instead\n");
+    }
+    /* Not interested in silly debug spew, bug #749195 */
+    if (Environment.get_variable("G_ENABLE_DIAGNOSTIC") == null) {
+      Environment.set_variable("G_ENABLE_DIAGNOSTIC", "0", true);
     }
     Environment.set_prgname("vte-app");
     Environment.set_application_name("Terminal");

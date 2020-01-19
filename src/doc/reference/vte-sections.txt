@@ -32,6 +32,7 @@ vte_terminal_set_color_bold
 vte_terminal_set_color_foreground
 vte_terminal_set_color_background
 vte_terminal_set_color_cursor
+vte_terminal_set_color_cursor_foreground
 vte_terminal_set_color_highlight
 vte_terminal_set_color_highlight_foreground
 vte_terminal_set_colors
@@ -53,28 +54,31 @@ vte_terminal_get_text
 vte_terminal_get_text_include_trailing_spaces
 vte_terminal_get_text_range
 vte_terminal_get_cursor_position
-vte_terminal_match_add_gregex
+vte_terminal_match_add_regex
 vte_terminal_match_remove
 vte_terminal_match_remove_all
 vte_terminal_match_check
 vte_terminal_match_check_event
-vte_terminal_match_set_cursor
 vte_terminal_match_set_cursor_type
 vte_terminal_match_set_cursor_name
 vte_terminal_set_cjk_ambiguous_width
 vte_terminal_get_cjk_ambiguous_width
 vte_terminal_set_encoding
 vte_terminal_get_encoding
+vte_terminal_set_word_char_exceptions
+vte_terminal_get_word_char_exceptions
 vte_terminal_write_contents_sync
 vte_terminal_search_find_next
 vte_terminal_search_find_previous
-vte_terminal_search_get_gregex
+vte_terminal_search_get_regex
 vte_terminal_search_get_wrap_around
-vte_terminal_search_set_gregex
+vte_terminal_search_set_regex
 vte_terminal_search_set_wrap_around
+vte_terminal_event_check_regex_simple
 
 <SUBSECTION>
 vte_get_user_shell
+vte_get_features
 
 <SUBSECTION>
 vte_terminal_spawn_sync
@@ -114,10 +118,33 @@ vte_terminal_get_window_title
 vte_terminal_get_current_directory_uri
 vte_terminal_get_current_file_uri
 
+<SUBSECTION Deprecated>
+vte_terminal_match_set_cursor
+vte_terminal_match_add_gregex
+vte_terminal_search_get_gregex
+vte_terminal_search_set_gregex
+vte_terminal_event_check_gregex_simple
+
 <SUBSECTION Private>
 VteCharAttributes
-VteTerminalPrivate
 VteTerminalClassPrivate
+</SECTION>
+
+<SECTION>
+<FILE>vte-regex</FILE>
+<TITLE>VteRegex</TITLE>
+VteRegex
+vte_regex_ref
+vte_regex_unref
+vte_regex_new_for_match
+vte_regex_new_for_search
+vte_regex_jit
+
+<SUBSECTION Standard>
+VTE_TYPE_REGEX
+vte_regex_get_type
+VTE_REGEX_ERROR
+vte_regex_error_quark
 </SECTION>
 
 <SECTION>
@@ -128,7 +155,6 @@ VtePtyError
 VtePty
 vte_pty_new_sync
 vte_pty_new_foreign_sync
-vte_pty_close
 vte_pty_child_setup
 vte_pty_get_fd
 vte_pty_set_size
@@ -151,6 +177,9 @@ VTE_IS_PTY
 VTE_IS_PTY_CLASS
 VTE_PTY_GET_CLASS
 VtePtyClass
+
+<SUBSECTION Deprecated>
+vte_pty_close
 </SECTION>
 
 <SECTION>
@@ -158,8 +187,11 @@ VtePtyClass
 <TITLE>Version Information</TITLE>
 
 VTE_MAJOR_VERSION
+vte_get_major_version
 VTE_MINOR_VERSION
+vte_get_minor_version
 VTE_MICRO_VERSION
+vte_get_micro_version
 
 <SUBSECTION>
 VTE_CHECK_VERSION
