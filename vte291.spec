@@ -1,7 +1,7 @@
 %global apiver 2.91
 
 Name:           vte291
-Version:        0.38.3
+Version:        0.38.4
 Release:        2%{?dist}
 Summary:        Terminal emulator library
 
@@ -12,6 +12,10 @@ Source0:        http://download.gnome.org/sources/vte/0.38/vte-%{version}.tar.xz
 Patch0:         0001-widget-Only-show-the-cursor-on-motion-if-moved.patch
 # https://bugzilla.gnome.org/show_bug.cgi?id=725342
 Patch1:         0001-widget-Don-t-hide-the-mouse-pointer.patch
+# https://bugzilla.gnome.org/show_bug.cgi?id=678042
+Patch2:         0001-emulation-Support-CSI-3J-clear-scrollback.patch
+# https://bugzilla.redhat.com/show_bug.cgi?id=1103380
+Patch3:         vte-scroll-speed.patch
 
 BuildRequires:  gettext
 BuildRequires:  gobject-introspection-devel
@@ -54,6 +58,8 @@ emulator library.
 %setup -q -n vte-%{version}
 %patch0 -p1 -b .motion
 %patch1 -p1 -b .auto-hide
+%patch2 -p1 -b .clear-csi3j
+%patch3 -p1 -b .scroll-speed
 
 sed -i 's/VTE_DEFAULT_TERM=xterm/\0-256color/' configure
 
@@ -101,6 +107,18 @@ rm -f $RPM_BUILD_ROOT%{_libdir}/*.la
 %{_sysconfdir}/profile.d/vte.sh
 
 %changelog
+* Fri May 13 2016 Debarshi Ray <rishi@fedoraproject.org> - 0.38.4-2
+- Add a property to configure the scroll speed
+Resolves: #1103380
+
+* Wed Mar 09 2016 Debarshi Ray <rishi@fedoraproject.org> - 0.38.4-1
+- Update to 0.38.4
+Resolves: #1303630
+
+* Wed Feb 24 2016 Debarshi Ray <rishi@fedoraproject.org> - 0.38.3-3
+- Backport support for CSI 3J (clear scrollback)
+Resolves: #1186623
+
 * Wed Jul 01 2015 Debarshi Ray <rishi@fedoraproject.org> - 0.38.3-2
 - Don't hide the mouse pointer
 Resolves: #1238315

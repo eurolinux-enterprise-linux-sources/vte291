@@ -106,20 +106,20 @@ check_PROGRAMS = dumpkeys$(EXEEXT) iso2022$(EXEEXT) \
 TESTS = table$(EXEEXT) vteconv$(EXEEXT) $(am__EXEEXT_2)
 subdir = src
 DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
-	$(top_srcdir)/mkinstalldirs $(srcdir)/vteversion.h.in \
-	$(srcdir)/vte.gresource.xml.in app.c $(top_srcdir)/depcomp \
+	$(srcdir)/vteversion.h.in $(srcdir)/vte.gresource.xml.in app.c \
+	$(top_srcdir)/depcomp \
 	$(srcdir)/vte_@VTE_API_MAJOR_VERSION@_@VTE_API_MINOR_VERSION@_vala.stamp \
 	$(dist_profile_DATA) $(header_HEADERS) \
-	$(top_srcdir)/test-driver TODO
+	$(top_srcdir)/test-driver
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/gtk-doc.m4 \
-	$(top_srcdir)/m4/intltool.m4 $(top_srcdir)/m4/libtool.m4 \
-	$(top_srcdir)/m4/ltoptions.m4 $(top_srcdir)/m4/ltsugar.m4 \
-	$(top_srcdir)/m4/ltversion.m4 $(top_srcdir)/m4/lt~obsolete.m4 \
-	$(top_srcdir)/acinclude.m4 $(top_srcdir)/configure.ac
+	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/ltoptions.m4 \
+	$(top_srcdir)/m4/ltsugar.m4 $(top_srcdir)/m4/ltversion.m4 \
+	$(top_srcdir)/m4/lt~obsolete.m4 $(top_srcdir)/acinclude.m4 \
+	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
-mkinstalldirs = $(SHELL) $(top_srcdir)/mkinstalldirs
+mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = $(top_builddir)/config.h
 CONFIG_CLEAN_FILES = vteversion.h vte.gresource.xml
 CONFIG_CLEAN_VPATH_FILES =

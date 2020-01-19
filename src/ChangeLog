@@ -1,3 +1,144 @@
+commit 0646cda75ade54c2c3ea512258ae59ead3cd3b29
+Author: Christian Persch <chpe@gnome.org>
+Date:   Mon Oct 12 16:36:24 2015 +0200
+
+    Version 0.38.4
+
+ NEWS | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+commit 8676cb7690563e86c627b6fef38a223fd814d88a
+Author: Egmont Koblinger <egmont@gmail.com>
+Date:   Fri Oct 2 19:38:38 2015 +0200
+
+    widget: Fix painting the preedit text near the right margin
+    
+    https://bugzilla.gnome.org/show_bug.cgi?id=755668
+    (cherry picked from commit d69645413f35ba6ebff9359a89bd121733a2e475)
+
+ src/vte.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+commit d3368a3f5afc0c522df955b9bc4430e4e7f354bf
+Author: Egmont Koblinger <egmont@gmail.com>
+Date:   Sun Sep 13 15:27:39 2015 +0200
+
+    widget: Fix regex matches not always being recognized
+    
+    https://bugzilla.gnome.org/show_bug.cgi?id=754949
+    (cherry picked from commit 1c703aaefa44f88ca50e210fcb0265f2b65851b9)
+
+ src/vte.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+commit 39941021dd3b7167a0ff408a76aa191ee075c652
+Author: Egmont Koblinger <egmont@gmail.com>
+Date:   Sun Aug 16 12:31:39 2015 +0200
+
+    widget: Ensure cursor is shown when blinking gets turned off
+    
+    https://bugzilla.gnome.org/show_bug.cgi?id=753645
+    (cherry picked from commit c1db666000f9c8e3d05930690926a6d7908e8e41)
+
+ src/vte.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+commit de2e8cb552b6dc023d5015ce7d1e32472374ca07
+Author: Necdet Yücel <necdetyucel@gmail.com>
+Date:   Sun Aug 9 17:05:18 2015 +0000
+
+    Updated Turkish translation
+
+ po/tr.po | 86 +++++++++++++++++++++++++++++++++++++++-------------------------
+ 1 file changed, 53 insertions(+), 33 deletions(-)
+
+commit 4067852360652bac5b8ca61448332ffbf01bc13f
+Author: Cédric Valmary <cvalmary@yahoo.fr>
+Date:   Mon May 18 13:46:51 2015 +0000
+
+    Updated Occitan translation
+
+ po/oc.po | 144 ++++++++++++++++++++++++++++-----------------------------------
+ 1 file changed, 64 insertions(+), 80 deletions(-)
+
+commit a6b929871926bbc296f9aafcf16f318b6d26684b
+Author: Egmont Koblinger <egmont@gmail.com>
+Date:   Tue Apr 28 22:57:04 2015 +0200
+
+    pty: Reset SIGQUIT handler to its default
+    
+    https://bugzilla.gnome.org/show_bug.cgi?id=748520
+    (cherry picked from commit a8b2ae135e352497301dd5ed7d37c9af08a9e75d)
+
+ src/pty.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+commit 73b9b7ffcad7df1d7ec52573a717b515c73db2bc
+Author: Sveinn í Felli <sv1@fellsnet.is>
+Date:   Tue Apr 28 16:12:43 2015 +0000
+
+    Updated Icelandic translation
+
+ po/is.po | 139 ++++++++++++++++++++++++++++-----------------------------------
+ 1 file changed, 62 insertions(+), 77 deletions(-)
+
+commit 4d01b91e2fd6affda8f13b94401e3c90f6a209e2
+Author: Egmont Koblinger <egmont@gmail.com>
+Date:   Mon Mar 30 23:19:46 2015 +0200
+
+    emulation: Fix vertical positioning after resize in some rare cases
+    
+    https://bugzilla.gnome.org/show_bug.cgi?id=747059
+    (cherry picked from commit 41d2e152878cc35d78a4dd8feb7cad52f088cdf9)
+
+ doc/rewrap.txt | 10 +++++-----
+ src/vte.c      |  2 +-
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+commit 8189dc84ee810095fd7e5995026012e424998126
+Author: Christian Persch <chpe@gnome.org>
+Date:   Tue Mar 24 14:58:29 2015 +0100
+
+    pty: More correct assertion
+    
+    Unlikely this is a problem, but was pointed out in
+    https://bugzilla.gnome.org/show_bug.cgi?id=746667
+    
+    (cherry picked from commit 3b1a3ce742c8dcbb58d0d434f82758d5156db9dc)
+
+ src/pty.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+commit 9a58886bca9552937ddb9632d6c77a82bd2ab219
+Author: Christian Persch <chpe@gnome.org>
+Date:   Mon Dec 15 22:42:45 2014 +0100
+
+    Post release version bump
+
+ configure.ac | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+commit 9c27de9c7b50512e3811cbd8385157c66746e742
+Author: Samir Ribic <samir.ribic@etf.unsa.ba>
+Date:   Sat Mar 14 23:30:09 2015 +0000
+
+    Updated Bosnian translation
+
+ po/bs.po | 133 +++++++++++++++++++++++----------------------------------------
+ 1 file changed, 48 insertions(+), 85 deletions(-)
+
+commit 6da5124bb1005cdce07a177ffba43e3b8ca8e514
+Author: Egmont Koblinger <egmont@gmail.com>
+Date:   Wed Jan 7 19:05:41 2015 +0100
+
+    doc: Add ignore-decorator for gtk-doc
+    
+    https://bugzilla.gnome.org/show_bug.cgi?id=742501
+    (cherry picked from commit 2b3b9a1167aafb8d9ac40b2b2c57e5434fb33379)
+
+ doc/reference/Makefile.am | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
 commit b033047970a7bb7e9e17c6e38ce5107daf704a7a
 Author: Debarshi Ray <debarshir@gnome.org>
 Date:   Thu Dec 4 16:46:00 2014 +0100

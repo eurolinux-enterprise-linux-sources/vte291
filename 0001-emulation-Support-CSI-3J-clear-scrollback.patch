@@ -1,0 +1,139 @@
+From 51de1d6024eb17e97a517226248d6fc657e2d88e Mon Sep 17 00:00:00 2001
+From: Egmont Koblinger <egmont@gmail.com>
+Date: Sun, 28 Dec 2014 23:53:22 +0100
+Subject: [PATCH] emulation: Support CSI 3J (clear scrollback)
+
+https://bugzilla.gnome.org/show_bug.cgi?id=678042
+---
+ src/caps.c        |  2 +-
+ src/ring.c        | 17 +++++++++++++++++
+ src/ring.h        |  1 +
+ src/vte-private.h |  1 +
+ src/vte.c         | 14 ++++++++++++++
+ src/vteseq.c      |  7 ++++++-
+ 6 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/src/caps.c b/src/caps.c
+index e6c235c2e10b..5ce8d931e444 100644
+--- a/src/caps.c
++++ b/src/caps.c
+@@ -130,7 +130,7 @@ const char _vte_xterm_capability_strings[] =
+         ENTRY(CSI "I", "cursor-forward-tabulation")
+         ENTRY(CSI "%dI", "cursor-forward-tabulation")
+         ENTRY(CSI "J", "erase-in-display")
+-        ENTRY(CSI "%dJ", "erase-in-display")
++        ENTRY(CSI "%mJ", "erase-in-display")
+         ENTRY(CSI "?J", "selective-erase-in-display")
+         ENTRY(CSI "?%dJ", "selective-erase-in-display")
+         ENTRY(CSI "K", "erase-in-line")
+diff --git a/src/ring.c b/src/ring.c
+index 267be8b71a29..2d6fa41586ed 100644
+--- a/src/ring.c
++++ b/src/ring.c
+@@ -595,6 +595,23 @@ _vte_ring_append (VteRing * ring)
+ 
+ 
+ /**
++ * _vte_ring_drop_scrollback:
++ * @ring: a #VteRing
++ * @position: drop contents up to this point, which must be in the writable region.
++ *
++ * Drop the scrollback (offscreen contents).
++ *
++ * TODOegmont: We wouldn't need the position argument after addressing 708213#c29.
++ */
++void
++_vte_ring_drop_scrollback (VteRing * ring, gulong position)
++{
++	_vte_ring_ensure_writable (ring, position);
++	ring->start = ring->writable = position;
++	_vte_ring_reset_streams (ring, position);
++}
++
++/**
+  * _vte_ring_set_visible_rows_hint:
+  * @ring: a #VteRing
+  *
+diff --git a/src/ring.h b/src/ring.h
+index ec38019b56b5..24e3906a9008 100644
+--- a/src/ring.h
++++ b/src/ring.h
+@@ -85,6 +85,7 @@ void _vte_ring_shrink (VteRing *ring, gulong max_len);
+ VteRowData *_vte_ring_insert (VteRing *ring, gulong position);
+ VteRowData *_vte_ring_append (VteRing *ring);
+ void _vte_ring_remove (VteRing *ring, gulong position);
++void _vte_ring_drop_scrollback (VteRing * ring, gulong position);
+ void _vte_ring_set_visible_rows_hint (VteRing *ring, gulong rows);
+ void _vte_ring_rewrap (VteRing *ring, glong columns, VteVisualPosition **markers);
+ gboolean _vte_ring_write_contents (VteRing *ring,
+diff --git a/src/vte-private.h b/src/vte-private.h
+index 1eb86a63cc1f..1f4ba76f62a4 100644
+--- a/src/vte-private.h
++++ b/src/vte-private.h
+@@ -425,6 +425,7 @@ void _vte_terminal_queue_contents_changed(VteTerminal *terminal);
+ void _vte_terminal_emit_text_deleted(VteTerminal *terminal);
+ void _vte_terminal_emit_text_inserted(VteTerminal *terminal);
+ void _vte_terminal_cursor_down (VteTerminal *terminal);
++void _vte_terminal_drop_scrollback (VteTerminal *terminal);
+ gboolean _vte_terminal_insert_char(VteTerminal *terminal, gunichar c,
+ 			       gboolean force_insert_mode,
+ 			       gboolean invalidate_cells);
+diff --git a/src/vte.c b/src/vte.c
+index 0ce9e2ead688..cf0ec1c31392 100644
+--- a/src/vte.c
++++ b/src/vte.c
+@@ -3016,6 +3016,20 @@ _vte_terminal_cursor_down (VteTerminal *terminal)
+ 	}
+ }
+ 
++/* Drop the scrollback */
++void
++_vte_terminal_drop_scrollback (VteTerminal *terminal)
++{
++	/* Only for normal screen; alternate screen doesn't have a scrollback. */
++	_vte_ring_drop_scrollback (terminal->pvt->normal_screen.row_data,
++				   terminal->pvt->normal_screen.insert_delta);
++
++	if (terminal->pvt->screen == &terminal->pvt->normal_screen) {
++		vte_terminal_queue_adjustment_value_changed (terminal, terminal->pvt->normal_screen.insert_delta);
++		_vte_terminal_adjust_adjustments_full (terminal);
++	}
++}
++
+ /* Insert a single character into the stored data array. */
+ gboolean
+ _vte_terminal_insert_char(VteTerminal *terminal, gunichar c,
+diff --git a/src/vteseq.c b/src/vteseq.c
+index 4d21f9f96f5d..ad0c2a689b3d 100644
+--- a/src/vteseq.c
++++ b/src/vteseq.c
+@@ -2419,13 +2419,14 @@ vte_sequence_handler_erase_in_display (VteTerminal *terminal, GValueArray *param
+ 	guint i;
+ 	/* The default parameter is 0. */
+ 	param = 0;
+-	/* Pull out a parameter. */
++	/* Pull out the first parameter. */
+ 	for (i = 0; (params != NULL) && (i < params->n_values); i++) {
+ 		value = g_value_array_get_nth(params, i);
+ 		if (!G_VALUE_HOLDS_LONG(value)) {
+ 			continue;
+ 		}
+ 		param = g_value_get_long(value);
++		break;
+ 	}
+ 	/* Clear the right area. */
+ 	switch (param) {
+@@ -2444,6 +2445,10 @@ vte_sequence_handler_erase_in_display (VteTerminal *terminal, GValueArray *param
+ 		/* Clear the entire screen. */
+ 		_vte_terminal_clear_screen (terminal);
+ 		break;
++	case 3:
++		/* Drop the scrollback. */
++		_vte_terminal_drop_scrollback (terminal);
++		break;
+ 	default:
+ 		break;
+ 	}
+-- 
+2.5.0
+
