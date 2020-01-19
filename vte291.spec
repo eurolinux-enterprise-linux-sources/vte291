@@ -1,44 +1,27 @@
 %global apiver 2.91
 
 Name:           vte291
-Version:        0.52.2
+Version:        0.38.3
 Release:        2%{?dist}
 Summary:        Terminal emulator library
 
 License:        LGPLv2+
 URL:            http://www.gnome.org/
+Source0:        http://download.gnome.org/sources/vte/0.38/vte-%{version}.tar.xz
+# https://bugzilla.gnome.org/show_bug.cgi?id=688456
+Patch0:         0001-widget-Only-show-the-cursor-on-motion-if-moved.patch
+# https://bugzilla.gnome.org/show_bug.cgi?id=725342
+Patch1:         0001-widget-Don-t-hide-the-mouse-pointer.patch
 
-Source0:        http://download.gnome.org/sources/vte/0.52/vte-%{version}.tar.xz
-Source1:        %{name}-git.mk
-
-# https://bugzilla.gnome.org/show_bug.cgi?id=711059
-# https://bugzilla.redhat.com/show_bug.cgi?id=1103380
-Patch100:       %{name}-command-notify-scroll-speed.patch
-
-# https://bugzilla.redhat.com/show_bug.cgi?id=1443504
-# https://bugzilla.redhat.com/show_bug.cgi?id=1590537
-Patch101:       %{name}-restore-gnome-pty-helper.patch
-
-# https://bugzilla.redhat.com/show_bug.cgi?id=1569801
-Patch102:       %{name}-avoid-braced-initialization.patch
-
-BuildRequires:  autoconf
-BuildRequires:  automake
-BuildRequires:  libtool
 BuildRequires:  gettext
-BuildRequires:  pkgconfig(gnutls)
 BuildRequires:  gobject-introspection-devel
-BuildRequires:  gperf
-BuildRequires:  pkgconfig(gtk+-3.0)
-BuildRequires:  pkgconfig(libpcre2-8)
+BuildRequires:  gtk3-devel
 BuildRequires:  intltool
-BuildRequires:  vala
+BuildRequires:  vala-tools
 
 # initscripts creates the utmp group
 Requires:       initscripts
 Requires:       vte-profile
-
-Conflicts:      gnome-terminal < 3.20.1-2
 
 %description
 VTE is a library implementing a terminal emulator widget for GTK+. VTE
@@ -69,19 +52,18 @@ emulator library.
 
 %prep
 %setup -q -n vte-%{version}
-%patch100 -p1 -b .command-notify-scroll-speed
-%patch101 -p1 -b .restore-gnome-pty-helper
-%patch102 -p1 -b .avoid-braced-initialization
+%patch0 -p1 -b .motion
+%patch1 -p1 -b .auto-hide
+
+sed -i 's/VTE_DEFAULT_TERM=xterm/\0-256color/' configure
 
 %build
-install -m 0644 %{SOURCE1} ./git.mk
-autoreconf --force --install
-
-CFLAGS="%optflags -fPIE -DPIE -Wno-nonnull" \
+CFLAGS="%optflags -fPIE -DPIE" \
 CXXFLAGS="$CFLAGS" \
 LDFLAGS="$LDFLAGS -Wl,-z,relro -Wl,-z,now -pie" \
 %configure \
         --disable-static \
+        --with-gtk=3.0 \
         --libexecdir=%{_libdir}/vte-%{apiver} \
         --disable-gtk-doc \
         --enable-gnome-pty-helper \
@@ -100,8 +82,7 @@ rm -f $RPM_BUILD_ROOT%{_libdir}/*.la
 %postun -p /sbin/ldconfig
 
 %files -f vte-%{apiver}.lang
-%license COPYING
-%doc NEWS README
+%doc COPYING NEWS README
 %{_libdir}/libvte-%{apiver}.so.0*
 %dir %{_libdir}/vte-%{apiver}
 %attr(2711,root,utmp) %{_libdir}/vte-%{apiver}/gnome-pty-helper
@@ -120,43 +101,6 @@ rm -f $RPM_BUILD_ROOT%{_libdir}/*.la
 %{_sysconfdir}/profile.d/vte.sh
 
 %changelog
-* Thu Jun 07 2018 Debarshi Ray <rishi@fedoraproject.org> - 0.52.2-2
-- Fix race between gnome-pty-helper and VteTerminal
-Resolves: #1569801, #1590537
-
-* Thu Jun 07 2018 Debarshi Ray <rishi@fedoraproject.org> - 0.52.2-1
-- Update to 0.52.2
-Resolves: #1569801
-
-* Tue May 23 2017 Debarshi Ray <rishi@fedoraproject.org> - 0.46.2-1
-- Update to 0.46.2
-- Backport upstream patch to remove an unused variable
-Resolves: #1387056
-
-* Mon May 22 2017 Debarshi Ray <rishi@fedoraproject.org> - 0.46.1-2
-- Restore gnome-pty-helper
-- Add git.mk and other dependencies to regenerate the build scripts
-Resolves: #1443504
-
-* Fri Feb 24 2017 Debarshi Ray <rishi@fedoraproject.org> - 0.46.1-1
-- Update to 0.46.1
-- Drop upstreamed patches
-- Drop workaround for old GTK+ bug (#1238315)
-- Rebase downstream patches
-Resolves: #1387056
-
-* Fri May 13 2016 Debarshi Ray <rishi@fedoraproject.org> - 0.38.4-2
-- Add a property to configure the scroll speed
-Resolves: #1103380
-
-* Wed Mar 09 2016 Debarshi Ray <rishi@fedoraproject.org> - 0.38.4-1
-- Update to 0.38.4
-Resolves: #1303630
-
-* Wed Feb 24 2016 Debarshi Ray <rishi@fedoraproject.org> - 0.38.3-3
-- Backport support for CSI 3J (clear scrollback)
-Resolves: #1186623
-
 * Wed Jul 01 2015 Debarshi Ray <rishi@fedoraproject.org> - 0.38.3-2
 - Don't hide the mouse pointer
 Resolves: #1238315

@@ -7,6 +7,7 @@ EXTRA_DIST = \
         boxes.txt \
 	readme.txt \
         rewrap.txt \
+	utmpwtmp.txt \
 	$(NULL)
 
 -include $(top_srcdir)/git.mk

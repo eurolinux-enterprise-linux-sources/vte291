@@ -3,6 +3,9 @@
 /* always defined to indicate that i18n is enabled */
 #undef ENABLE_NLS
 
+/* Force use of GDK multihead-safe APIs. */
+#undef GDK_MULTIHEAD_SAFE
+
 /* Package translatable messages domain name. */
 #undef GETTEXT_PACKAGE
 
@@ -15,19 +18,8 @@
 /* Define to 1 if you have the `ceil' function. */
 #undef HAVE_CEIL
 
-/* Define to 1 if you have the Mac OS X function CFLocaleCopyCurrent in the
-   CoreFoundation framework. */
-#undef HAVE_CFLOCALECOPYCURRENT
-
 /* Define to 1 if you have the `cfmakeraw' function. */
 #undef HAVE_CFMAKERAW
-
-/* Define to 1 if you have the Mac OS X function CFPreferencesCopyAppValue in
-   the CoreFoundation framework. */
-#undef HAVE_CFPREFERENCESCOPYAPPVALUE
-
-/* define if the compiler supports basic C++11 syntax */
-#undef HAVE_CXX11
 
 /* Define to 1 if you have the `dcgettext' function. */
 #undef HAVE_DCGETTEXT
@@ -39,20 +31,20 @@
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #undef HAVE_DLFCN_H
 
-/* Define to 1 if you have the `explicit_bzero' function. */
-#undef HAVE_EXPLICIT_BZERO
-
-/* Define to 1 if you have the `fdwalk' function. */
-#undef HAVE_FDWALK
-
 /* Define to 1 if you have the `floor' function. */
 #undef HAVE_FLOOR
 
 /* Define to 1 if you have the `fork' function. */
 #undef HAVE_FORK
 
+/* Define to 1 if you have the `fwrite_unlocked' function. */
+#undef HAVE_FWRITE_UNLOCKED
+
 /* Define to 1 if you have the `getpgid' function. */
 #undef HAVE_GETPGID
+
+/* Define to 1 if you have the `getpt' function. */
+#undef HAVE_GETPT
 
 /* Define if the GNU gettext() function is already present or preinstalled. */
 #undef HAVE_GETTEXT
@@ -72,6 +64,9 @@
 /* Define to 1 if you have the <memory.h> header file. */
 #undef HAVE_MEMORY_H
 
+/* Define if you have the openpty function. */
+#undef HAVE_OPENPTY
+
 /* Define to 1 if you have the `posix_openpt' function. */
 #undef HAVE_POSIX_OPENPT
 
@@ -81,11 +76,14 @@
 /* Define to 1 if you have the `ptsname' function. */
 #undef HAVE_PTSNAME
 
-/* Define to 1 if you have the <pty.h> header file. */
-#undef HAVE_PTY_H
+/* Define to 1 if you have the `ptsname_r' function. */
+#undef HAVE_PTSNAME_R
 
 /* Define to 1 if you have the `pwrite' function. */
 #undef HAVE_PWRITE
+
+/* Define if you have the recvmsg function. */
+#undef HAVE_RECVMSG
 
 /* Define to 1 if you have the `round' function. */
 #undef HAVE_ROUND
@@ -96,14 +94,17 @@
 /* Define to 1 if you have the `setsid' function. */
 #undef HAVE_SETSID
 
+/* Define if you have the socket function. */
+#undef HAVE_SOCKET
+
+/* Define if you have the socketpair function. */
+#undef HAVE_SOCKETPAIR
+
 /* Define to 1 if you have the <stdint.h> header file. */
 #undef HAVE_STDINT_H
 
 /* Define to 1 if you have the <stdlib.h> header file. */
 #undef HAVE_STDLIB_H
-
-/* Define to 1 if you have the `strchrnul' function. */
-#undef HAVE_STRCHRNUL
 
 /* Define to 1 if you have the <strings.h> header file. */
 #undef HAVE_STRINGS_H
@@ -113,9 +114,6 @@
 
 /* Define to 1 if you have the <stropts.h> header file. */
 #undef HAVE_STROPTS_H
-
-/* Define to 1 if you have the <sys/resource.h> header file. */
-#undef HAVE_SYS_RESOURCE_H
 
 /* Define to 1 if you have the <sys/select.h> header file. */
 #undef HAVE_SYS_SELECT_H
@@ -131,6 +129,9 @@
 
 /* Define to 1 if you have the <sys/types.h> header file. */
 #undef HAVE_SYS_TYPES_H
+
+/* Define to 1 if you have the <sys/un.h> header file. */
+#undef HAVE_SYS_UN_H
 
 /* Define to 1 if you have the <sys/wait.h> header file. */
 #undef HAVE_SYS_WAIT_H
@@ -156,8 +157,15 @@
 /* Define to 1 if you have the <wchar.h> header file. */
 #undef HAVE_WCHAR_H
 
-/* Define to the sub-directory where libtool stores uninstalled libraries. */
+/* Define to 1 if the system has the type `wint_t'. */
+#undef HAVE_WINT_T
+
+/* Define to the sub-directory in which libtool stores uninstalled libraries.
+   */
 #undef LT_OBJDIR
+
+/* Define to 1 if your C compiler doesn't accept -c and -o together. */
+#undef NO_MINUS_C_MINUS_O
 
 /* Name of package */
 #undef PACKAGE
@@ -214,19 +222,8 @@
 /* The default value $TERM is set to. */
 #undef VTE_DEFAULT_TERM
 
-/* Define to 1 to enable GnuTLS support */
-#undef WITH_GNUTLS
-
-/* Enable large inode numbers on Mac OS X 10.5.  */
-#ifndef _DARWIN_USE_64_BIT_INODE
-# define _DARWIN_USE_64_BIT_INODE 1
-#endif
-
-/* Number of bits in a file offset, on hosts where this is settable. */
-#undef _FILE_OFFSET_BITS
-
-/* Define for large files, on AIX-style hosts. */
-#undef _LARGE_FILES
+/* Define if you intend to use gnome-pty-helper. */
+#undef VTE_USE_GNOME_PTY_HELPER
 
 /* Define to 1 if on MINIX. */
 #undef _MINIX

@@ -8,8 +8,6 @@
 
 #include <glib-object.h>
 
-#include "vtemacros.h"
-
 G_BEGIN_DECLS
 /*** END file-header ***/
 
@@ -19,7 +17,6 @@ G_BEGIN_DECLS
 /*** END file-production ***/
 
 /*** BEGIN value-header ***/
-_VTE_PUBLIC
 GType @enum_name@_get_type (void);
 #define VTE_TYPE_@ENUMSHORT@ (@enum_name@_get_type ())
 /*** END value-header ***/

@@ -60,22 +60,19 @@ typedef enum {
 	VTE_DEBUG_PANGOCAIRO    = 1 << 20,
 	VTE_DEBUG_WIDGET_SIZE   = 1 << 21,
         VTE_DEBUG_STYLE         = 1 << 22,
-	VTE_DEBUG_RESIZE        = 1 << 23,
-        VTE_DEBUG_REGEX         = 1 << 24,
-        VTE_DEBUG_HYPERLINK     = 1 << 25,
+	VTE_DEBUG_RESIZE        = 1 << 23
 } VteDebugFlags;
 
 void _vte_debug_init(void);
-const char *_vte_debug_sequence_to_string(const char *str,
-                                          gssize length);
+const char *_vte_debug_sequence_to_string(const char *str);
 
-extern guint _vte_debug_flags;
-static inline gboolean _vte_debug_on(guint flags) G_GNUC_CONST G_GNUC_UNUSED;
+extern VteDebugFlags _vte_debug_flags;
+static inline gboolean _vte_debug_on(VteDebugFlags flags) G_GNUC_CONST G_GNUC_UNUSED;
 
 static inline gboolean
-_vte_debug_on(guint flags)
+_vte_debug_on(VteDebugFlags flags)
 {
-	return (_vte_debug_flags & flags) != 0;
+	return (_vte_debug_flags & flags) == flags;
 }
 
 #ifdef VTE_DEBUG
@@ -84,12 +81,12 @@ _vte_debug_on(guint flags)
 #define _VTE_DEBUG_IF(flags) if (0)
 #endif
 
-#ifdef VTE_DEBUG
 #if defined(__GNUC__) && G_HAVE_GNUC_VARARGS
 #define _vte_debug_print(flags, fmt, ...) \
 	G_STMT_START { _VTE_DEBUG_IF(flags) g_printerr(fmt, ##__VA_ARGS__); } G_STMT_END
 #else
 #include <stdarg.h>
+#include <glib/gstdio.h>
 static void _vte_debug_print(guint flags, const char *fmt, ...)
 {
 	_VTE_DEBUG_IF(flags) {
@@ -100,9 +97,6 @@ static void _vte_debug_print(guint flags, const char *fmt, ...)
 	}
 }
 #endif
-#else
-#define _vte_debug_print(args...) do { } while(0)
-#endif /* VTE_DEBUG */
 
 G_END_DECLS
 

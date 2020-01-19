@@ -1,14 +1,3 @@
-0.49.1
-======
-* Implement hyperlink feature (Egmont Koblinger, #779734)
-* Bug fixes
-
-0.45.90
-=======
-
-* VTE now depends on PCRE2, and GRegex (which uses PCRE1 internally)
-use is deprecated.
-
 0.37.0
 ======
 * New API: vte-2.91

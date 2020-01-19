@@ -1,4 +1,5 @@
-src/iso2022.cc
-src/pty.cc
-src/vte.cc
-src/vtegtk.cc
+[type: gettext/glade]src/app.ui
+src/iso2022.c
+src/pty.c
+src/vteapp.c
+src/vte.c

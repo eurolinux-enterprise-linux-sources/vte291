@@ -21,152 +21,60 @@
 #ifndef vterowdata_h_included
 #define vterowdata_h_included
 
-#include <string.h>
-
 #include "vteunistr.h"
 #include "vtemacros.h"
-#include "vtedefines.hh"
-
-#include "attr.hh"
-#include "color-triple.hh"
 
 G_BEGIN_DECLS
 
-#define VTE_TAB_WIDTH_MAX		((1 << VTE_ATTR_COLUMNS_BITS) - 1)
+#define VTE_TAB_WIDTH_BITS		4  /* Has to be able to store the value of 8. */
+#define VTE_TAB_WIDTH_MAX		((1 << VTE_TAB_WIDTH_BITS) - 1)
 
-#define VTE_CELL_ATTR_COMMON_BYTES      12  /* The number of common bytes in VteCellAttr and VteStreamCellAttr */
+#define VTE_DEFAULT_FG			256
+#define VTE_DEFAULT_BG			257
+#define VTE_BOLD_FG			258
+#define VTE_HIGHLIGHT_FG		259
+#define VTE_HIGHLIGHT_BG		260
+#define VTE_CURSOR_BG			261
+#define VTE_PALETTE_SIZE		262
 
 /*
  * VteCellAttr: A single cell style attributes
  *
- * When adding new attributes, keep in sync with VteStreamCellAttr and
- * update VTE_CELL_ATTR_COMMON_BYTES accordingly.
- * Also don't forget to update basic_cell below!
- */
-
-#define CELL_ATTR_BOOL(lname,uname) \
-        inline void set_##lname(bool value) \
-        { \
-                vte_attr_set_bool(&attr, VTE_ATTR_##uname##_MASK, value); \
-        } \
-        \
-        inline constexpr bool lname() const \
-        { \
-                return vte_attr_get_bool(attr, VTE_ATTR_##uname##_SHIFT); \
-        }
-
-#define CELL_ATTR_UINT(lname,uname) \
-        inline void set_##lname(unsigned int value) \
-        { \
-                vte_attr_set_value(&attr, VTE_ATTR_##uname##_MASK, VTE_ATTR_##uname##_SHIFT, value); \
-        } \
-        \
-        inline constexpr uint32_t lname() const \
-        { \
-                return vte_attr_get_value(attr, VTE_ATTR_##uname##_VALUE_MASK, VTE_ATTR_##uname##_SHIFT); \
-        }
-
-typedef struct _VTE_GNUC_PACKED VteCellAttr {
-        uint32_t attr;
-
-	/* 4-byte boundary (8-byte boundary in VteCell) */
-        uint64_t m_colors;                     /* fore, back and deco (underline) colour */
-
-        /* 12-byte boundary (16-byte boundary in VteCell) */
-        uint32_t hyperlink_idx; /* a unique hyperlink index at a time for the ring's cells,
-                                   0 means not a hyperlink, VTE_HYPERLINK_IDX_TARGET_IN_STREAM
-                                   means the target is irrelevant/unknown at the moment.
-                                   If bitpacking, choose a size big enough to hold a different idx
-                                   for every cell in the ring but not yet in the stream
-                                   (currently the height rounded up to the next power of two, times width)
-                                   for supported VTE sizes, and update VTE_HYPERLINK_IDX_TARGET_IN_STREAM. */
-
-        /* Methods */
-
-        inline constexpr uint64_t colors() const { return m_colors; }
-
-        inline void copy_colors(VteCellAttr const& other)
-        {
-                m_colors = vte_color_triple_copy(other.colors());
-        }
-
-#define CELL_ATTR_COLOR(name) \
-        inline void set_##name(uint32_t value) \
-        { \
-                vte_color_triple_set_##name(&m_colors, value); \
-        } \
-        \
-        inline constexpr uint32_t name() const \
-        { \
-                return vte_color_triple_get_##name(m_colors); \
-        }
-
-        CELL_ATTR_COLOR(fore)
-        CELL_ATTR_COLOR(back)
-        CELL_ATTR_COLOR(deco)
-#undef CELL_ATTR_COLOR
-
-        inline constexpr bool has_any(uint32_t mask) const
-        {
-                return !!(attr & mask);
-        }
-
-        inline constexpr bool has_all(uint32_t mask) const
-        {
-                return (attr & mask) == mask;
-        }
-
-        inline constexpr bool has_none(uint32_t mask) const
-        {
-                return !(attr & mask);
-        }
-
-        inline void unset(uint32_t mask)
-        {
-                attr &= ~mask;
-        }
-
-        CELL_ATTR_UINT(columns, COLUMNS)
-        CELL_ATTR_BOOL(fragment, FRAGMENT)
-        CELL_ATTR_BOOL(bold, BOLD)
-        CELL_ATTR_BOOL(italic, ITALIC)
-        CELL_ATTR_UINT(underline, UNDERLINE)
-        CELL_ATTR_BOOL(strikethrough, STRIKETHROUGH)
-        CELL_ATTR_BOOL(overline, OVERLINE)
-        CELL_ATTR_BOOL(reverse, REVERSE)
-        CELL_ATTR_BOOL(blink, BLINK)
-        CELL_ATTR_BOOL(dim, DIM)
-        CELL_ATTR_BOOL(invisible, INVISIBLE)
-        /* ATTR_BOOL(boxed, BOXED) */
-} VteCellAttr;
-G_STATIC_ASSERT (sizeof (VteCellAttr) == 16);
-G_STATIC_ASSERT (offsetof (VteCellAttr, hyperlink_idx) == VTE_CELL_ATTR_COMMON_BYTES);
-
-/*
- * VteStreamCellAttr: Variant of VteCellAttr to be stored in attr_stream.
+ * Ordered by most commonly changed attributes, to
+ * optimize the compact representation.
  *
- * When adding new attributes, keep in sync with VteCellAttr and
- * update VTE_CELL_ATTR_COMMON_BYTES accordingly.
+ * When adding new attributes, remember to update basic_cell below too.
  */
 
-typedef struct _VTE_GNUC_PACKED _VteStreamCellAttr {
-        uint32_t attr; /* Same as VteCellAttr. We only access columns
-                        * and fragment, however.
-                        */
-        /* 4-byte boundary */
-        uint64_t colors;
-        /* 12-byte boundary */
-        guint16 hyperlink_length;       /* make sure it fits VTE_HYPERLINK_TOTAL_LENGTH_MAX */
+typedef struct _VteCellAttr {
+	guint64 fragment: 1;	/* A continuation cell. */
+	guint64 columns: VTE_TAB_WIDTH_BITS;	/* Number of visible columns
+						   (as determined by g_unicode_iswide(c)).
+						   Also abused for tabs; bug 353610
+						   */
+	guint64 bold: 1;
+	guint64 italic: 1;
+	guint64 fore: 25;	/* Index into color palette, or direct RGB, */
+	/* 4-byte boundary */
+	guint64 back: 25;	/* see vte-private.h */
 
-        /* Methods */
-        CELL_ATTR_UINT(columns, COLUMNS)
-        CELL_ATTR_BOOL(fragment, FRAGMENT)
-} VteStreamCellAttr;
-G_STATIC_ASSERT (sizeof (VteStreamCellAttr) == 14);
-G_STATIC_ASSERT (offsetof (VteStreamCellAttr, hyperlink_length) == VTE_CELL_ATTR_COMMON_BYTES);
+	guint64 underline: 1;
+	guint64 strikethrough: 1;
 
-#undef CELL_ATTR_BOOL
-#undef CELL_ATTR_UINT
+	guint64 reverse: 1;
+	guint64 blink: 1;
+	guint64 dim: 1;		/* also known as faint, half intensity etc. */
+
+	guint64 invisible: 1;
+        /* 1 bit unused */
+} VteCellAttr;
+G_STATIC_ASSERT (sizeof (VteCellAttr) == 8);
+
+typedef union _VteIntCellAttr {
+	VteCellAttr s;
+	guint64 i;
+} VteIntCellAttr;
+G_STATIC_ASSERT (sizeof (VteCellAttr) == sizeof (VteIntCellAttr));
 
 /*
  * VteCell: A single cell's data
@@ -176,14 +84,37 @@ typedef struct _VTE_GNUC_PACKED _VteCell {
 	vteunistr c;
 	VteCellAttr attr;
 } VteCell;
-G_STATIC_ASSERT (sizeof (VteCell) == 20);
+G_STATIC_ASSERT (sizeof (VteCell) == 12);
 
-static const VteCell basic_cell = {
-	0,
+typedef union _VteIntCell {
+	VteCell cell;
+	struct _VTE_GNUC_PACKED {
+		guint32 c;
+		guint64 attr;
+	} i;
+} VteIntCell;
+G_STATIC_ASSERT (sizeof (VteCell) == sizeof (VteIntCell));
+
+static const VteIntCell basic_cell = {
 	{
-                VTE_ATTR_DEFAULT, /* attr */
-                VTE_COLOR_TRIPLE_INIT_DEFAULT, /* colors */
-                0, /* hyperlink_idx */
+		0,
+		{
+			0, /* fragment */
+			1, /* columns */
+			0, /* bold */
+			0, /* italic */
+			VTE_DEFAULT_FG, /* fore */
+			VTE_DEFAULT_BG, /* back */
+
+			0, /* underline */
+			0, /* strikethrough */
+
+			0, /* reverse */
+			0, /* blink */
+			0, /* half */
+
+			0  /* invisible */
+		}
 	}
 };
 
@@ -226,15 +157,6 @@ _vte_row_data_get_writable (VteRowData *row, gulong col)
 		return NULL;
 
 	return &row->cells[col];
-}
-
-/*
- * Copy the common attributes from VteCellAttr to VteStreamCellAttr or vice versa.
- */
-static inline void
-_attrcpy (void *dst, void *src)
-{
-        memcpy(dst, src, VTE_CELL_ATTR_COMMON_BYTES);
 }
 
 void _vte_row_data_init (VteRowData *row);

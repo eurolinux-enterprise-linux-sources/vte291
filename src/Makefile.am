@@ -1,16 +1,19 @@
-NULL =
-
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = src bindings po doc perf
+SUBDIRS = src po doc perf
 
 EXTRA_DIST = \
+	MAINTAINERS \
 	HACKING \
 	autogen.sh \
 	ChangeLog.pre-git \
-	$(NULL)
+	vte/vte.h
 
 DISTCLEANFILES =
+
+if BUILD_GNOME_PTY_HELPER
+SUBDIRS += gnome-pty-helper
+endif
 
 if ENABLE_GLADE_CATALOGUE
 SUBDIRS += glade
@@ -22,10 +25,11 @@ pkgconfig_DATA = vte-$(VTE_API_VERSION).pc
 DISTCHECK_CONFIGURE_FLAGS = \
 	--enable-gtk-doc \
 	--enable-introspection \
-	--disable-vala \
-	--disable-test-application \
+	--enable-vala \
+	--enable-test-application \
+	--enable-gnome-pty-helper \
 	--disable-silent-rules \
-	--with-gtk=$(GTK_API_VERSION)
+	--with-gtk=3.0
 
 MAINTAINERCLEANFILES = \
 	$(GITIGNORE_MAINTAINERCLEANFILES_TOPLEVEL) \
